@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { api } from '../api'
+import { isDark, onThemeChange } from '../utils/theme'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
@@ -86,15 +87,31 @@ function render() {
     legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 50, right: 20, top: 30, bottom: 40 },
     xAxis: { type: 'value', name: 'epoch', min: 1 },
-    yAxis: { type: 'value', name: METRIC_LABELS[metric.value] || metric.value, splitLine: { lineStyle: { color: '#e8e6dc' } } },
+    yAxis: { type: 'value', name: METRIC_LABELS[metric.value] || metric.value, splitLine: { lineStyle: { color: isDark() ? '#3a423c' : '#e8e6dc' } } },
     series,
   }, { notMerge: true })
 }
 
+let offTheme = null
+function initChart() {
+  chart?.dispose()
+  chart = echarts.init(chartEl.value, isDark() ? 'dark' : undefined)
+  render()
+}
+function onResize() { chart?.resize() }
+
 onMounted(async () => {
   await loadTasks()
-  chart = echarts.init(chartEl.value)
-  window.addEventListener('resize', () => chart?.resize())
+  initChart()
+  window.addEventListener('resize', onResize)
+  offTheme = onThemeChange(() => initChart())
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  offTheme && offTheme()
+  chart?.dispose()
+  chart = null
 })
 
 watch(selectedIds, onSelect)

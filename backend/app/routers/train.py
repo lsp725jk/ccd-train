@@ -1,5 +1,6 @@
 """训练任务：提交、列表、详情、日志增量、停止。"""
 import json
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -54,10 +55,19 @@ def create_train(body: TrainCreate):
             raise HTTPException(400, f"引擎「{body.engine}」不可用，可选：{train_queue.available_engines()}")
         if not train_queue.check_engine(body.engine, body.task_type):
             raise HTTPException(400, f"引擎「{body.engine}」与任务类型「{body.task_type}」不匹配")
+        # 模型名去重（源头治理）：去掉连续「(重试)」后缀，若项目内已存在同名则追加版本号，
+        # 避免反复重试导致「xx (重试) (重试) (重试)…」冗长命名。
+        base = re.sub(r"( \(重试\))+", "", body.name.strip())
+        name = base
+        i = 2
+        while conn.execute("SELECT 1 FROM models WHERE project_id=? AND name=? LIMIT 1",
+                           (body.project_id, name)).fetchone():
+            name = f"{base} v{i}"
+            i += 1
         cur = conn.execute(
             """INSERT INTO models (project_id, name, task_type, engine, config)
                VALUES (?, ?, ?, ?, ?)""",
-            (body.project_id, body.name.strip(), body.task_type, body.engine,
+            (body.project_id, name, body.task_type, body.engine,
              json.dumps({"epochs": body.epochs, "imgsz": body.imgsz, "batch": body.batch,
                          "custom_arch": body.custom_arch}, ensure_ascii=False)),
         )

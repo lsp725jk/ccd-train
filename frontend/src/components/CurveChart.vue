@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { isDark, onThemeChange } from '../utils/theme'
 
 const props = defineProps({
   columns: { type: Array, default: () => [] },
@@ -9,6 +10,11 @@ const props = defineProps({
 
 const el = ref(null)
 let chart = null
+let offTheme = null
+
+function splitColor() {
+  return isDark() ? '#3a423c' : '#e8e6dc'
+}
 
 function render() {
   if (!chart || !props.columns.length || !props.rows.length) return
@@ -26,19 +32,35 @@ function render() {
       data: props.rows.map(r => r[i]),
     }))
   chart.setOption({
+    backgroundColor: 'transparent',
     tooltip: { trigger: 'axis' },
     legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 46, right: 16, top: 30, bottom: 34 },
     xAxis: { type: 'category', data: x, name: 'epoch', nameTextStyle: { fontSize: 11 } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#e8e6dc' } } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: splitColor() } } },
     series,
   }, { notMerge: true })
 }
 
-onMounted(() => {
-  chart = echarts.init(el.value)
+function init() {
+  chart?.dispose()
+  chart = echarts.init(el.value, isDark() ? 'dark' : undefined)
   render()
-  window.addEventListener('resize', () => chart?.resize())
+}
+
+function onResize() { chart?.resize() }
+
+onMounted(() => {
+  init()
+  window.addEventListener('resize', onResize)
+  offTheme = onThemeChange(() => { init() })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  offTheme && offTheme()
+  chart?.dispose()
+  chart = null
 })
 
 watch(() => [props.columns, props.rows], render, { deep: true })

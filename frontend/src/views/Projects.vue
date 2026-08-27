@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { friendlyName } from '../utils/format'
+import { Plus, Delete } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const list = ref([])
@@ -132,7 +133,7 @@ function openProject(pid) { router.push(`/projects/${pid}/dataset`) }
 
     <div class="page-head">
       <h2>检测项目</h2>
-      <el-button type="primary" @click="dialog = true">新建项目</el-button>
+      <el-button type="primary" @click="dialog = true"><el-icon style="margin-right:4px"><Plus /></el-icon>新建项目</el-button>
     </div>
 
     <el-table :data="list" v-loading="loading" class="card clickable" @row-click="open">
@@ -143,7 +144,7 @@ function openProject(pid) { router.push(`/projects/${pid}/dataset`) }
       <el-table-column prop="created_at" label="创建时间" width="170" />
       <el-table-column label="" width="80" align="center">
         <template #default="{ row }">
-          <el-button link type="danger" @click.stop="remove(row)">删除</el-button>
+          <el-button link type="danger" @click.stop="remove(row)"><el-icon><Delete /></el-icon><span style="margin-left:2px">删除</span></el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { hexToRGBA, pointInPolygon } from '../utils/labeling'
+import { ArrowLeft, ArrowRight, FullScreen, ZoomIn, ZoomOut, Check, Delete, Plus, Close } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
@@ -958,12 +959,12 @@ const imgUrl = ref('')
                              @active-change="color => color && (c.color = color)"
                              @change="color => updateCatColor(c, color)" />
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis">{{ c.name }}</span>
-            <el-button link size="small" type="danger" @click.stop="removeCat(c)">×</el-button>
+            <el-button link size="small" type="danger" @click.stop="removeCat(c)"><el-icon><Close /></el-icon></el-button>
           </div>
           <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
             <el-color-picker v-model="newCatColor" size="small" />
             <el-input v-model="newCatName" placeholder="新建标签" size="small" @keyup.enter="addNewCat" />
-            <el-button size="small" type="primary" @click="addNewCat">＋</el-button>
+            <el-button size="small" type="primary" @click="addNewCat"><el-icon><Plus /></el-icon></el-button>
           </div>
           <div style="color:#8a8175;font-size:0.75rem;margin-top:6px">
             类别属于当前数据集（{{ current?.name }}），删除后标注将变为未分类
@@ -1001,12 +1002,12 @@ const imgUrl = ref('')
               <el-radio-button value="pan">平移</el-radio-button>
             </el-radio-group>
             <template v-if="mode === 'sam'">
-              <el-button size="small" type="primary" @click="confirmSam" :loading="samLoading">确认掩码</el-button>
-              <el-button size="small" @click="clearSam">清空</el-button>
+              <el-button size="small" type="primary" @click="confirmSam" :loading="samLoading"><el-icon><Check /></el-icon><span style="margin-left:3px">确认掩码</span></el-button>
+              <el-button size="small" @click="clearSam"><el-icon><Delete /></el-icon><span style="margin-left:3px">清空</span></el-button>
             </template>
             <template v-if="mode === 'polygon'">
-              <el-button size="small" type="primary" :disabled="polyPts.length < 3" @click="finishPolygon">完成多边形</el-button>
-              <el-button size="small" @click="polyPts = []; renderOverlay()">清空</el-button>
+              <el-button size="small" type="primary" :disabled="polyPts.length < 3" @click="finishPolygon"><el-icon><Check /></el-icon><span style="margin-left:3px">完成多边形</span></el-button>
+              <el-button size="small" @click="polyPts = []; renderOverlay()"><el-icon><Delete /></el-icon><span style="margin-left:3px">清空</span></el-button>
             </template>
             <el-switch v-if="mode === 'brush' || mode === 'sam'" v-model="fillMode" size="small"
                        active-text="填充" inactive-text="轮廓" style="margin-left:4px" />
@@ -1034,11 +1035,11 @@ const imgUrl = ref('')
             <el-button size="small" :title="showGrid ? '隐藏参考网格 (G)' : '显示参考网格 (G)'"
                        @click="showGrid = !showGrid">{{ showGrid ? '格' : '格' }}</el-button>
             <span style="font-size:0.8rem;color:#8a8175">{{ zoomLabel }}</span>
-            <el-button size="small" @click="zoomBy(1.25)">＋</el-button>
-            <el-button size="small" @click="zoomBy(0.8)">－</el-button>
-            <el-button size="small" @click="zoomReset">适应</el-button>
-            <el-button size="small" @click="nextImage(-1)">上一张</el-button>
-            <el-button size="small" type="primary" @click="nextImage(1)">下一张</el-button>
+            <el-button size="small" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></el-button>
+            <el-button size="small" @click="zoomBy(0.8)"><el-icon><ZoomOut /></el-icon></el-button>
+            <el-button size="small" @click="zoomReset"><el-icon><FullScreen /></el-icon><span style="margin-left:3px">适应</span></el-button>
+            <el-button size="small" @click="nextImage(-1)"><el-icon><ArrowLeft /></el-icon><span style="margin-left:3px">上一张</span></el-button>
+            <el-button size="small" type="primary" @click="nextImage(1)">下一张<el-icon style="margin-left:3px"><ArrowRight /></el-icon></el-button>
           </div>
           <div v-loading="loading" style="min-height:400px">
             <div v-if="currentImage" ref="canvasScroll" class="canvas-scroll" @wheel.prevent="onWheel">

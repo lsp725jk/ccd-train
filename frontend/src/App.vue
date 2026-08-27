@@ -17,6 +17,8 @@ function toggleTheme() {
   dark.value = !dark.value
   applyTheme()
   try { localStorage.setItem('ccd-theme', dark.value ? 'dark' : 'light') } catch { /* ignore */ }
+  // 广播主题变更，供 echarts 等外部组件重新初始化
+  window.dispatchEvent(new CustomEvent('ccd-theme', { detail: dark.value }))
 }
 onMounted(() => {
   try { dark.value = localStorage.getItem('ccd-theme') === 'dark' } catch { /* ignore */ }
