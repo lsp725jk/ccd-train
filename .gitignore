@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+*.pyo
+
+# ---- 虚拟环境 / 缓存 ----
+.venv/
+venv/
+backend/.venv/
+labelstudio/.venv/
+labelstudio/.uv-cache/
+labelstudio/.tmp/
+
+# ---- Node / 前端 ----
+frontend/node_modules/
+frontend/dist/
+
+# ---- 运行时数据与训练产物（不入库） ----
+backend/data/
+labelstudio/data/
+backend/*.log
+backend/*.pt
+backend/*.onnx
+demo_data/
+*.log
+*.bak
+
+# ---- 第三方 vendored 源码（体积大，可从 PyPI 重新获取） ----
+third_party/
+
+# ---- 本地审查截图 ----
+_review/
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+desktop_thumbs.db

@@ -1,0 +1,13 @@
+# CCD 模型训练平台 - 后端依赖（全部为预编译 wheel，零编译依赖）
+# 注意：torch / torchvision 不在此处安装（CUDA 版需专用源，由 install.bat 单独处理）
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+Pillow>=10.0
+numpy>=1.26
+scikit-learn>=1.4
+timm>=1.0
+ultralytics>=8.2
+segmentation-models-pytorch>=0.3.4
+onnx>=1.16
+onnxruntime-gpu==1.20.2
