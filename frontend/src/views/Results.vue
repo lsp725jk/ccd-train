@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { friendlyName } from '../utils/format'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
@@ -117,7 +118,7 @@ async function remove(row) {
       <el-table-column label="模型" min-width="160">
         <template #default="{ row }">
           <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-weight:500">{{ row.name }}</span>
+            <span style="font-weight:500">{{ friendlyName(row.name) }}</span>
             <el-tag v-if="row.is_best" size="small" type="success" effect="plain">最佳</el-tag>
           </div>
         </template>

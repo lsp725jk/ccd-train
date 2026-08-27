@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { friendlyName } from '../utils/format'
 import CurveChart from '../components/CurveChart.vue'
 import ResultCard from '../components/ResultCard.vue'
 import TaskItem from '../components/TaskItem.vue'
@@ -468,7 +469,7 @@ onUnmounted(stopPolling)
           <div class="card" style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
               <span style="font-weight:600;font-size:0.95rem">
-                {{ current.model_name }}
+                {{ friendlyName(current.model_name) }}
                 <span style="color:#8a8175;font-weight:400;font-size:0.8rem">#{{ current.id }}</span>
               </span>
               <div>

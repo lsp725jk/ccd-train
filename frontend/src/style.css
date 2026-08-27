@@ -1,4 +1,10 @@
+/* =========================================================
+   CCD Train 全局视觉主题
+   - :root     浅色主题（工业风：米白底 + 墨绿主色）
+   - html.dark 深色主题（覆盖 Element Plus 变量）
+   ========================================================= */
 :root {
+  /* 主色：墨绿 */
   --el-color-primary: #4a6b4a;
   --el-color-primary-light-3: #739074;
   --el-color-primary-light-5: #9db49d;
@@ -6,10 +12,52 @@
   --el-color-primary-light-8: #dbe4db;
   --el-color-primary-light-9: #eef3ee;
   --el-color-primary-dark-2: #3b563b;
-  /* 通用语义色（部分页面引用了这些变量） */
+
+  /* 语义色 */
   --text-muted: #8a8175;
   --text-light: #a89f92;
   --border: #d8cfbe;
+
+  /* 表面与阴影 */
+  --bg-app: #f5f1e8;
+  --bg-surface: #fbf8f1;
+  --bg-accent: #eef0e9;
+  --bg-hover: #faf7ef;
+  --shadow-card: 0 1px 2px rgba(60, 50, 35, 0.06), 0 0 0 1px rgba(60, 50, 35, 0.02);
+  --shadow-lift: 0 6px 18px rgba(60, 50, 35, 0.10);
+  --radius: 8px;
+  --header-h: 48px;
+}
+
+/* 深色主题：覆盖 Element Plus 变量 + 本项目表面变量 */
+html.dark {
+  color-scheme: dark;
+  --el-color-primary: #8bb78b;
+  --el-color-primary-light-3: #7aa37a;
+  --el-color-primary-light-5: #6a8f6a;
+  --el-color-primary-light-7: #4f6e52;
+  --el-color-primary-light-8: #435e46;
+  --el-color-primary-light-9: #374d3a;
+  --el-color-primary-dark-2: #a4c8a4;
+  --el-bg-color: #1c211d;
+  --el-bg-color-overlay: #242b25;
+  --el-fill-color-blank: #1d241f;
+  --el-border-color: #3a423c;
+  --el-border-color-light: #323a34;
+  --el-text-color-primary: #e6e8e3;
+  --el-text-color-regular: #c5cbc4;
+  --el-text-color-secondary: #98a08f;
+
+  --text-muted: #98a08f;
+  --text-light: #7c8477;
+  --border: #3a423c;
+
+  --bg-app: #161b18;
+  --bg-surface: #1d241f;
+  --bg-accent: #222b24;
+  --bg-hover: #242e27;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lift: 0 6px 18px rgba(0, 0, 0, 0.5);
 }
 
 html, body, #app {
@@ -18,24 +66,26 @@ html, body, #app {
 }
 
 body {
-  background: #f5f1e8;
-  color: #2a2622;
+  background: var(--bg-app);
+  color: var(--el-text-color-primary, #2a2622);
   font-family: 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .app { height: 100%; }
 
 .aside {
-  background: #eef0e9;
-  border-right: 1px solid #d8cfbe;
+  background: var(--bg-accent);
+  border-right: 1px solid var(--border);
+  transition: background 0.2s ease;
 }
 
 .aside .logo {
   padding: 16px 20px;
   font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: #4a6b4a;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--el-color-primary);
 }
 
 .aside .el-menu {
@@ -46,27 +96,28 @@ body {
 .aside .menu-divider {
   margin: 10px 14px 4px;
   font-size: 0.75rem;
-  color: #8a8175;
-  border-bottom: 1px solid #d8cfbe;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 6px;
 }
 
 .header {
-  background: #fbf8f1;
-  border-bottom: 1px solid #d8cfbe;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 20px;
 }
 
 .header .project-name {
-  font-weight: 500;
-  color: #4a6b4a;
+  font-weight: 600;
+  color: var(--el-color-primary);
 }
 
 .main {
   padding: 20px;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 
 .page-head {
@@ -79,14 +130,16 @@ body {
 .page-head h2 {
   margin: 0;
   font-size: 1.2rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .card {
-  background: #fbf8f1;
-  border: 1px solid #d8cfbe;
-  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 16px;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.18s ease, background 0.2s ease, transform 0.12s ease;
 }
 
 .clickable .el-table__row { cursor: pointer; }
@@ -94,5 +147,11 @@ body {
 .preview-img {
   max-width: 100%;
   border-radius: 4px;
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
 }
+
+/* 统一表格行悬停 */
+.el-table { --el-table-row-hover-bg-color: var(--bg-hover); }
+
+/* 空态图标与文字配色跟随主题 */
+.el-empty__description p { color: var(--text-muted); }

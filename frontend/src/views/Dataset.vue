@@ -286,7 +286,10 @@ async function doSplit() {
           <div v-loading="loading" style="min-height:200px">
             <div v-if="images.length" class="img-grid">
               <div v-for="img in images" :key="img.id" class="img-cell" @click="preview = img">
-                <el-image :src="api.files.imageUrl(img.id)" fit="cover" lazy />
+                <el-image :src="api.files.imageUrl(img.id)" fit="cover" lazy>
+                  <template #placeholder><div class="img-ph">加载中…</div></template>
+                  <template #error><div class="img-ph err">加载失败</div></template>
+                </el-image>
                 <div class="img-meta">{{ img.width }}×{{ img.height }}</div>
               </div>
             </div>
@@ -438,6 +441,11 @@ async function doSplit() {
   aspect-ratio: 1;
 }
 .img-cell .el-image { width: 100%; height: 100%; }
+.img-ph {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  background: #f2ecdd; color: #a89f92; font-size: 0.72rem;
+}
+.img-ph.err { color: #c07; }
 .img-meta {
   position: absolute;
   bottom: 0; left: 0; right: 0;

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { routes } from './router'
 import { api } from './api'
@@ -7,6 +7,24 @@ import { api } from './api'
 const route = useRoute()
 const pid = computed(() => (route.params.pid ? Number(route.params.pid) : null))
 const project = ref(null)
+
+// 主题：浅/深切换，localStorage 持久化
+const dark = ref(false)
+function applyTheme() {
+  document.documentElement.classList.toggle('dark', dark.value)
+}
+function toggleTheme() {
+  dark.value = !dark.value
+  applyTheme()
+  try { localStorage.setItem('ccd-theme', dark.value ? 'dark' : 'light') } catch { /* ignore */ }
+}
+onMounted(() => {
+  try { dark.value = localStorage.getItem('ccd-theme') === 'dark' } catch { /* ignore */ }
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && !localStorage.getItem('ccd-theme')) {
+    dark.value = true
+  }
+  applyTheme()
+})
 
 watch(pid, async (id) => {
   project.value = null
@@ -47,6 +65,12 @@ const projectMenus = computed(() => {
     <el-container>
       <el-header class="header" height="48px">
         <span v-if="pid" class="project-name">{{ project?.name || '…' }}</span>
+        <span v-else class="project-name">模型训练平台</span>
+        <el-tooltip :content="dark ? '切换到浅色' : '切换到深色'" placement="left">
+          <el-button circle size="small" text @click="toggleTheme" class="theme-toggle">
+            <span style="font-size:1.05rem">{{ dark ? '☀️' : '🌙' }}</span>
+          </el-button>
+        </el-tooltip>
       </el-header>
       <el-main class="main">
         <router-view />
@@ -54,3 +78,9 @@ const projectMenus = computed(() => {
     </el-container>
   </el-container>
 </template>
+
+<style scoped>
+.theme-toggle { opacity: 0.75; }
+.theme-toggle:hover { opacity: 1; background: var(--bg-hover); }
+.icon-menu { margin-right: 2px; }
+</style>

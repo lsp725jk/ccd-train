@@ -10,6 +10,7 @@ import sam from './sam'
 import fs from './fs'
 import scenes from './scenes'
 import xal from './xal'
+import dashboard from './dashboard'
 
 /** 统一 API 入口：新增领域模块时在此挂载，页面 import { api } from '../api' 不变。 */
 export const api = {
@@ -27,6 +28,7 @@ export const api = {
   fs,
   scenes,
   xal,
+  dashboard,
 }
 
 export default api
