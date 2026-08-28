@@ -4,7 +4,7 @@
    - html.dark 深色主题（覆盖 Element Plus 变量）
    ========================================================= */
 :root {
-  /* 主色：墨绿 */
+  /* 主色：墨绿（--el-* 为兼容变量，组件已迁 Naive，仅样式引用） */
   --el-color-primary: #4a6b4a;
   --el-color-primary-light-3: #739074;
   --el-color-primary-light-5: #9db49d;
@@ -12,6 +12,8 @@
   --el-color-primary-light-8: #dbe4db;
   --el-color-primary-light-9: #eef3ee;
   --el-color-primary-dark-2: #3b563b;
+  --el-text-color-primary: #2a2622;
+  --el-text-color-regular: #4a433c;
 
   /* 语义色 */
   --text-muted: #8a8175;

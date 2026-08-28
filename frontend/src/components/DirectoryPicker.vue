@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import { NButton, NSelect, NSpin } from 'naive-ui'
 import { api } from '../api'
 
 const props = defineProps({
@@ -55,38 +56,38 @@ onMounted(loadDrives)
 <template>
   <div class="dir-picker">
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-      <el-select v-model="path" size="small" style="width:130px" @change="open">
-        <el-option v-for="d in drives" :key="d" :value="d" :label="d" />
-      </el-select>
-      <el-button size="small" @click="up" :disabled="!parent">上一级</el-button>
-      <el-button size="small" @click="loadDrives">刷新</el-button>
-      <span style="font-size:0.8rem;color:#4a433c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;direction:rtl;text-align:left">
+      <n-select v-model:value="path" size="small" style="width:130px"
+                :options="drives.map(d => ({ label: d, value: d }))" @update:value="open" />
+      <n-button size="small" @click="up" :disabled="!parent">上一级</n-button>
+      <n-button size="small" @click="loadDrives">刷新</n-button>
+      <span style="font-size:0.8rem;color:var(--text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;direction:rtl;text-align:left">
         {{ path }}
       </span>
     </div>
-    <div v-loading="loading" class="dir-list">
+    <n-spin :show="loading" class="dir-list">
       <div v-for="d in dirs" :key="d" class="dir-item" @click="enter(d)">
         <span class="dir-icon"></span>
         <span>{{ d }}</span>
       </div>
-      <div v-if="!dirs.length && !loading" style="color:#8a8175;font-size:0.82rem;padding:14px">
+      <div v-if="!dirs.length && !loading" style="color:var(--text-muted);font-size:0.82rem;padding:14px">
         此目录下没有子文件夹，可直接选择当前目录
       </div>
-    </div>
-    <div v-if="error" style="color:#8b2c1f;font-size:0.8rem;margin-top:6px">{{ error }}</div>
+    </n-spin>
+    <div v-if="error" style="color:#c9544e;font-size:0.8rem;margin-top:6px">{{ error }}</div>
     <div style="display:flex;justify-content:flex-end;margin-top:10px">
-      <el-button size="small" type="primary" :disabled="!path" @click="pick">选择此文件夹</el-button>
+      <n-button size="small" type="primary" :disabled="!path" @click="pick">选择此文件夹</n-button>
     </div>
   </div>
 </template>
 
 <style scoped>
 .dir-list {
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
   border-radius: 4px;
   max-height: 240px;
   overflow-y: auto;
-  background: #fbf8f1;
+  background: var(--bg-surface);
+  display: block;
 }
 .dir-item {
   display: flex;
@@ -97,10 +98,10 @@ onMounted(loadDrives)
   border-bottom: 0.5px solid rgba(0, 0, 0, 0.05);
   align-items: center;
 }
-.dir-item:hover { background: #eef3ee; }
+.dir-item:hover { background: var(--bg-hover); }
 .dir-icon {
   width: 12px; height: 10px;
-  border: 1.5px solid #4a6b4a;
+  border: 1.5px solid var(--el-color-primary);
   border-radius: 2px;
   position: relative;
   flex-shrink: 0;
@@ -110,7 +111,7 @@ onMounted(loadDrives)
   position: absolute;
   top: -4px; left: 1px;
   width: 5px; height: 3px;
-  background: #4a6b4a;
+  background: var(--el-color-primary);
   border-radius: 1px 1px 0 0;
 }
 </style>
