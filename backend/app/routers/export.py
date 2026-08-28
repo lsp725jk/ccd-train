@@ -151,6 +151,9 @@ def predict_image(model_id: int, body: dict):
                         cats = ds_cats
             except Exception:
                 pass
+    # 类别索引必须与训练一致：排除常驻「正常」
+    from app.engines.data_utils import defect_categories
+    cats = defect_categories(cats)
     from app.engines.data_utils import image_path_of
     try:
         img_path = image_path_of(image_id)

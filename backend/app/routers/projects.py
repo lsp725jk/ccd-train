@@ -92,10 +92,24 @@ def delete_project(project_id: int):
 
 @router.get("/datasets/{dataset_id}/categories")
 def list_dataset_categories(dataset_id: int):
-    """数据集的缺陷类别（类别按数据集隔离）。"""
+    """数据集的类别（按数据集隔离）。
+
+    「正常」为常驻分类：每个数据集自动确保存在（绿色），用于整图分类
+    （训练/评估时区分正常与缺陷）。
+    """
     with get_conn() as conn:
         if not conn.execute("SELECT 1 FROM datasets WHERE id = ?", (dataset_id,)).fetchone():
             raise HTTPException(404, "数据集不存在")
+        # 常驻「正常」类别：不存在则自动创建（幂等）
+        normal = conn.execute(
+            "SELECT * FROM categories WHERE dataset_id = ? AND name = '正常'", (dataset_id,)
+        ).fetchone()
+        if not normal:
+            ds = conn.execute("SELECT project_id FROM datasets WHERE id = ?", (dataset_id,)).fetchone()
+            conn.execute(
+                "INSERT INTO categories (project_id, dataset_id, name, color) VALUES (?, ?, '正常', '#3F9D63')",
+                (ds["project_id"], dataset_id),
+            )
         rows = conn.execute(
             "SELECT * FROM categories WHERE dataset_id = ? ORDER BY id", (dataset_id,)
         ).fetchall()

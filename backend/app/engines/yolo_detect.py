@@ -11,8 +11,8 @@ import cv2
 
 from app.engines.base import EngineBase, get_db, run_engine, sync_ultralytics_curve
 from app.engines.data_utils import (
-    cat_index, cfg_dataset_ids, get_pipeline_ops, imgsz_hw, load_annotations_multi, load_categories,
-    load_ds, load_images, read_image,
+    cat_index, cfg_dataset_ids, defect_categories, get_pipeline_ops, imgsz_hw, load_annotations_multi,
+    load_categories, load_ds, load_images, read_image,
 )
 
 COL_MAP = {
@@ -46,6 +46,7 @@ class YoloDetectEngine(EngineBase):
             ds_ids = cfg_dataset_ids(cfg)
             ds_rows = [load_ds(conn, dsid) for dsid in ds_ids]
             cats = load_categories(conn, cfg["project_id"], ds_ids)
+            cats = defect_categories(cats)  # 常驻「正常」不参与检测类表
             idx = cat_index(cats)
             names = [c["name"] for c in cats]
             imgs = []

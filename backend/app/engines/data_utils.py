@@ -6,6 +6,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+# 常驻「正常」类别名：仅用于整图分类（有无判断），检测/分割训练时自动排除
+NORMAL_NAME = "正常"
+
+
+def defect_categories(cats: list) -> list:
+    """排除常驻「正常」类别，返回缺陷类表（检测/分割训练的类列表）。"""
+    return [c for c in cats if c.get("name") != NORMAL_NAME]
+
 
 def load_ds(conn: sqlite3.Connection, dataset_id: int):
     row = conn.execute("SELECT * FROM datasets WHERE id=?", (dataset_id,)).fetchone()

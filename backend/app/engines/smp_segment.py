@@ -13,7 +13,7 @@ import numpy as np
 
 from app.engines.base import EngineBase, get_db, run_engine
 from app.engines.data_utils import (
-    cat_index_1, cfg_dataset_ids, get_pipeline_ops, imgsz_wh, load_annotations_multi, load_categories, load_ds, load_images, read_image,
+    cat_index_1, cfg_dataset_ids, defect_categories, get_pipeline_ops, imgsz_wh, load_annotations_multi, load_categories, load_ds, load_images, read_image,
 )
 from app.engines.seg_dataset import make_ds
 
@@ -34,6 +34,7 @@ class SmpSegmentEngine(EngineBase):
             ds_ids = cfg_dataset_ids(cfg)
             ds_rows = [load_ds(conn, dsid) for dsid in ds_ids]
             cats = load_categories(conn, cfg["project_id"], ds_ids)
+            cats = defect_categories(cats)  # 常驻「正常」不参与分割类表
             idx = cat_index_1(cats)  # 1 起，0 留给背景
             names = [c["name"] for c in cats]
             imgs = []

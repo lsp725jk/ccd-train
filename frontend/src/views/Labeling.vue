@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NButton, NCheckbox, NColorPicker, NEmpty, NGi, NGrid, NIcon, NImage,
-  NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSpin, NSwitch,
+  NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSpin, NSwitch, NTag,
   useDialog, useMessage,
 } from 'naive-ui'
 import { api } from '../api'
@@ -199,6 +199,9 @@ function onWheel(e) {
 
 // 当前类别颜色（画笔笔迹用）
 const catColor = computed(() => categories.value.find(c => c.id === catId.value)?.color || '#4a6b4a')
+// 「正常」为常驻整图分类，与缺陷类别分开展示
+const normalCat = computed(() => categories.value.find(c => c.name === '正常') || null)
+const defectCats = computed(() => categories.value.filter(c => c.name !== '正常'))
 
 // 笔刷光标圈：独立覆盖层，避免全量重绘
 const cursorCanvas = ref(null)
@@ -958,11 +961,24 @@ const imgUrl = ref('')
       <!-- 左：类别 + 图像列表 -->
       <n-gi :span="6">
         <div class="card" style="margin-bottom:12px">
-          <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">缺陷类别</div>
-          <div v-if="!categories.length" style="color:#8b2c1f;font-size:0.82rem;margin-bottom:6px">
-            暂无类别，请先在数据集页添加
+          <!-- 常驻「正常」：整图分类专用，独立于缺陷类别 -->
+          <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">整图分类</div>
+          <div v-if="normalCat" class="cat-row" :class="{ on: catId === normalCat.id }"
+               @click="catId = normalCat.id">
+            <n-color-picker v-model:value="normalCat.color" size="small" :modes="['hex']" :show-alpha="false"
+                            @complete="color => color && updateCatColor(normalCat, color)" />
+            <span style="flex:1">{{ normalCat.name }}</span>
+            <n-tag size="tiny" type="success" :bordered="false">常驻</n-tag>
           </div>
-          <div class="cat-row" v-for="c in categories" :key="c.id" @click="catId = c.id"
+          <div v-else style="color:#8a8175;font-size:0.82rem;padding:6px 0">
+            「正常」为系统常驻分类，用于图像分类（选它 = 该图无缺陷）
+          </div>
+
+          <div style="font-weight:600;margin:12px 0 8px;font-size:0.9rem">缺陷类别</div>
+          <div v-if="!defectCats.length" style="color:#8b2c1f;font-size:0.82rem;margin-bottom:6px">
+            暂无缺陷类别，请先在数据集页添加
+          </div>
+          <div class="cat-row" v-for="c in defectCats" :key="c.id" @click="catId = c.id"
                :class="{ on: catId === c.id }">
             <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
                             @complete="color => color && updateCatColor(c, color)" />
@@ -975,7 +991,7 @@ const imgUrl = ref('')
             <n-button size="small" type="primary" @click="addNewCat"><n-icon><Plus /></n-icon></n-button>
           </div>
           <div style="color:#8a8175;font-size:0.75rem;margin-top:6px">
-            类别属于当前数据集（{{ current?.name }}），删除后标注将变为未分类
+            缺陷类别属于当前数据集（{{ current?.name }}）；「正常」常驻、删除后标注将变为未分类
           </div>
         </div>
         <div class="card">

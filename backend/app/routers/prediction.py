@@ -78,6 +78,8 @@ def _predict_detect(model, run_dir, cfg):
     ds_map, test_imgs = _test_images(cfg)
     with get_db_conn() as conn:
         cats = load_categories(conn, cfg["project_id"], cfg_dataset_ids(cfg))
+    from app.engines.data_utils import defect_categories
+    cats = defect_categories(cats)
     names = [c["name"] for c in cats]
     yolo = YOLO(str(_load_weight(run_dir)))
     pred_dir = run_dir / "viz" / "predictions"
@@ -127,6 +129,8 @@ def _predict_segment(model, run_dir, cfg):
     with get_db_conn() as conn:
         ds_ids = cfg_dataset_ids(cfg)
         cats = _lc(conn, cfg["project_id"], ds_ids)
+    from app.engines.data_utils import defect_categories as _dc
+    cats = _dc(cats)
     ds_map, test_imgs = _test_images(cfg)
     n_classes = len(cats)
     encoder = cfg["engine"].split("_")[-1] if cfg["engine"].startswith("unet") else "resnet50"
