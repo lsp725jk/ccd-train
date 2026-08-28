@@ -3,7 +3,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NButton, NDataTable, NTag, NModal, NForm, NFormItem, NInput, NInputNumber,
-  NSelect, NEmpty, NSpin, useMessage, useDialog,
+  NSelect, NEmpty, NSpin, NImage, useMessage, useDialog,
 } from 'naive-ui'
 import { api } from '../api'
 import { friendlyName } from '../utils/format'
@@ -55,6 +55,8 @@ const previewModel = ref(null)
 const previewImage = ref(null)
 const previewResult = ref('')
 const previewLoading = ref(false)
+const previewDatasets = ref([])
+const previewDsId = ref(null)
 const previewImages = ref([])
 const previewImageOptions = computed(() => previewImages.value.map(im => ({ label: im.rel_path, value: im.id })))
 
@@ -76,13 +78,20 @@ async function openPreview(row) {
   previewResult.value = ''
   previewImage.value = null
   previewDlg.value = true
-  if (!previewImages.value.length) {
-    const ds = await api.datasets.list(pid)
-    if (ds.length) {
-      const imgs = await api.datasets.images(ds[0].id, { page: 1, page_size: 200 })
-      previewImages.value = imgs.items
+  if (!previewDatasets.value.length) {
+    previewDatasets.value = await api.datasets.list(pid)
+    if (previewDatasets.value.length) {
+      previewDsId.value = previewDatasets.value[0].id
+      await loadPreviewImages()
     }
   }
+}
+
+async function loadPreviewImages() {
+  if (!previewDsId.value) { previewImages.value = []; return }
+  const r = await api.datasets.images(previewDsId.value, { page: 1, page_size: 200 })
+  previewImages.value = r.items
+  previewImage.value = null
 }
 
 async function doPreview() {
@@ -223,11 +232,21 @@ const columns = computed(() => {
 
     <n-modal v-model:show="previewDlg" preset="card"
              :title="previewModel ? `${previewModel.name} 推理预览` : '推理预览'" style="width:760px">
-      <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center">
-        <span style="font-size:0.85rem;color:var(--text-muted)">图像</span>
-        <n-select v-model:value="previewImage" filterable :options="previewImageOptions" style="width:320px" placeholder="选择图像" />
+      <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:0.85rem;color:var(--text-muted)">数据集</span>
+        <n-select v-model:value="previewDsId" :options="previewDatasets.map(d => ({ label: `${d.name}（${d.image_count} 张）`, value: d.id }))"
+                  style="width:220px" @update:value="loadPreviewImages" />
+        <span style="font-size:0.85rem;color:var(--text-muted)">图像（点缩略图选择）</span>
+        <n-select v-model:value="previewImage" filterable :options="previewImageOptions" style="width:280px" placeholder="或搜索文件名" />
         <n-button type="primary" :loading="previewLoading" @click="doPreview">推理</n-button>
         <span style="color:var(--text-muted);font-size:0.8rem">检测/分类走 ONNX，异常检测走特征库热图</span>
+      </div>
+      <div v-if="previewImages.length" class="preview-thumbs">
+        <div v-for="im in previewImages" :key="im.id" class="preview-thumb"
+             :class="{ on: previewImage === im.id }" @click="previewImage = im.id">
+          <n-image :src="api.files.imageUrl(im.id)" object-fit="cover" preview-disabled
+                   style="width:100%;height:100%;display:block" />
+        </div>
       </div>
       <n-spin :show="previewLoading" style="min-height:320px;text-align:center">
         <img v-if="previewResult" :src="previewResult" style="max-width:100%;border:1px solid var(--border);border-radius:4px" />
@@ -281,3 +300,28 @@ const columns = computed(() => {
     </n-modal>
   </div>
 </template>
+
+
+<style scoped>
+.preview-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  padding: 4px;
+}
+.preview-thumb {
+  aspect-ratio: 1;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+  background: var(--bg-accent);
+}
+.preview-thumb.on { border-color: var(--el-color-primary); }
+.preview-thumb .n-image { width: 100%; height: 100%; display: block; position: relative; }
+.preview-thumb .n-image img { width: 100% !important; height: 100% !important; object-fit: cover; position: absolute; inset: 0; }
+</style>

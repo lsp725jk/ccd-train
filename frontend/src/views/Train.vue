@@ -358,7 +358,12 @@ onUnmounted(stopPolling)
               <n-select v-model:value="form.engine" :options="engineOptions" style="width:100%" @update:value="applyEngineDefaults" />
             </n-form-item>
             <n-form-item v-if="form.engine === 'custom'" label="架构定义">
-              <n-input v-model:value="form.custom_arch" placeholder="如：yolo11n-custom.yaml 或 scale=0.75" />
+              <div style="width:100%">
+                <n-input v-model:value="form.custom_arch" placeholder="填自定义模型 yaml 路径，如 yolo11n-custom.yaml（可选）" />
+                <div style="font-size:0.76rem;color:var(--text-muted);margin-top:4px">
+                  仅高级用户使用：可填写自定义 yaml（含 scale/backbone 调整）。留空 = 使用该档位默认架构。
+                </div>
+              </div>
             </n-form-item>
             <n-form-item label="数据集">
               <n-select v-model:value="form.dataset_ids" multiple :options="datasetOptions" style="width:100%" placeholder="可多选，混合训练" />
@@ -411,26 +416,29 @@ onUnmounted(stopPolling)
               </n-gi>
             </n-grid>
             <n-grid :cols="24" :x-gap="8" style="margin-bottom:4px">
-              <n-gi :span="8">
+              <n-gi :span="12">
                 <n-form-item label="输入宽" label-width="60">
                   <n-input-number v-model:value="form.imgsz_w" :min="64" :max="8192" :step="32" style="width:100%" :disabled="ratioLock" />
                 </n-form-item>
               </n-gi>
-              <n-gi :span="8">
+              <n-gi :span="12">
                 <n-form-item label="输入高" label-width="60">
                   <n-input-number v-model:value="form.imgsz_h" :min="64" :max="8192" :step="32" style="width:100%" :disabled="ratioLock" />
                 </n-form-item>
               </n-gi>
-              <n-gi :span="8">
-                <n-form-item label="按比例">
-                  <div style="display:flex;align-items:center;gap:8px;width:100%">
-                    <n-checkbox v-model:checked="ratioLock" />
-                    <n-slider v-if="ratioLock" v-model:value="ratioVal" :min="10" :max="100" :step="5" style="flex:1" />
-                    <span v-if="ratioLock" style="font-size:0.8rem;color:#4a6b4a;width:38px;text-align:right">{{ ratioVal }}%</span>
-                  </div>
-                </n-form-item>
-              </n-gi>
             </n-grid>
+            <n-form-item label="按比例锁定" label-width="90" style="margin-bottom:4px">
+              <div style="display:flex;align-items:center;gap:12px;width:100%">
+                <n-checkbox v-model:checked="ratioLock" />
+                <template v-if="ratioLock">
+                  <n-slider v-model:value="ratioVal" :min="10" :max="100" :step="5" style="flex:1" />
+                  <n-input-number v-model:value="ratioVal" :min="10" :max="100" :step="1" size="small"
+                                  style="width:96px" />
+                  <span style="font-size:0.8rem;color:var(--text-muted)">%</span>
+                </template>
+                <span v-else style="font-size:0.8rem;color:var(--text-muted)">勾选后按比例缩放输入尺寸</span>
+              </div>
+            </n-form-item>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
               <n-button size="small" :loading="viewLoading" @click="previewView">模型视角预览</n-button>
               <span style="color:#8a8175;font-size:0.78rem">等比缩放 + 灰边填充到输入尺寸，建议宽高比与相机图像一致</span>

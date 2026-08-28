@@ -72,10 +72,27 @@ def export_model(model_id: int):
     elif model["task_type"] == "segment":
         import torch
         import segmentation_models_pytorch as smp
+        # 类别数必须与训练一致：训练按数据集级类别（config.json 的 dataset_ids），
+        # 不能用项目级计数（跨数据集项目会因维度不匹配导出失败）
         with get_conn() as conn:
-            n_classes = conn.execute(
-                "SELECT COUNT(*) FROM categories WHERE project_id=?", (model["project_id"],)
-            ).fetchone()[0]
+            cfg_path = run_dir / "config.json"
+            dsids = []
+            if cfg_path.is_file():
+                try:
+                    import json as _json
+                    from app.engines.data_utils import cfg_dataset_ids
+                    dsids = cfg_dataset_ids(_json.loads(cfg_path.read_text(encoding="utf-8")))
+                except Exception:
+                    dsids = []
+            if dsids:
+                ph = ",".join("?" * len(dsids))
+                n_classes = conn.execute(
+                    f"SELECT COUNT(*) FROM categories WHERE dataset_id IN ({ph})", tuple(dsids)
+                ).fetchone()[0]
+            else:
+                n_classes = conn.execute(
+                    "SELECT COUNT(*) FROM categories WHERE project_id=?", (model["project_id"],)
+                ).fetchone()[0]
         encoder = model["engine"].split("_")[-1] if model["engine"].startswith("unet") else "resnet50"
         arch = "DeepLabV3Plus" if model["engine"].startswith("deeplab") else "Unet"
         m = smp.create_model(arch, encoder_name=encoder, encoder_weights=None,
@@ -92,6 +109,7 @@ def export_model(model_id: int):
             m, dummy, str(onnx_path),
             input_names=["images"], output_names=["logits"],
             opset_version=12, dynamic_axes={"images": {0: "batch"}, "logits": {0: "batch"}},
+            dynamo=False,  # torch>=2.9 默认新导出器需 onnxscript；legacy 导出器无需额外依赖
         )
     else:
         raise HTTPException(400, f"任务类型 {model['task_type']} 暂不支持导出")
@@ -146,6 +164,9 @@ def predict_image(model_id: int, body: dict):
 
     if model["task_type"] == "segment" and model["onnx_path"]:
         _predict_segment(model, img_path, out_path, imgsz, cats)
+    elif model["task_type"] == "segment":
+        # 未导出 ONNX 时直接用 torch 权重推理（无需先导出即可预览）
+        _predict_segment_torch(model, img_path, out_path, imgsz, cats, run_dir)
     elif model["task_type"] == "patchcore" or (model["task_type"] == "us_segment"):
         _predict_patchcore(model, img_path, out_path, run_dir)
     elif model["task_type"] in ("detect", "classify"):
@@ -167,7 +188,7 @@ def _predict_ultralytics(model, img_path: Path, out_path: Path, imgsz: int):
         res[0].save(str(out_path))
     else:
         # 无检测结果也保存原图（叠加空框）
-        img = cv2.imread(str(img_path))
+        img = cv2.imdecode(np.fromfile(str(img_path), dtype="uint8"), cv2.IMREAD_COLOR)
         cv2.imencode(".jpg", img)[1].tofile(out_path)
 
 
@@ -176,12 +197,68 @@ def _task_dir_of(model) -> Path:
     return run_dir
 
 
+def _cfg_dataset_ids(cfg_path: Path) -> list:
+    import json as _json
+    try:
+        from app.engines.data_utils import cfg_dataset_ids
+        cfg = _json.loads(cfg_path.read_text(encoding="utf-8"))
+        return cfg_dataset_ids(cfg)
+    except Exception:
+        return []
+
+
+def _predict_segment_torch(model, img_path: Path, out_path: Path, imgsz: int | list[int], cats, run_dir: Path):
+    """segment（未导出 ONNX）：torch 权重直接推理预览（类别数与训练一致：数据集级）。"""
+    import torch
+    import segmentation_models_pytorch as smp
+
+    with get_conn() as conn:
+        dsids = _cfg_dataset_ids(run_dir / "config.json")
+        if dsids:
+            ph = ",".join("?" * len(dsids))
+            n_classes = conn.execute(
+                f"SELECT COUNT(*) FROM categories WHERE dataset_id IN ({ph})", tuple(dsids)
+            ).fetchone()[0]
+        else:
+            n_classes = conn.execute(
+                "SELECT COUNT(*) FROM categories WHERE project_id=?", (model["project_id"],)
+            ).fetchone()[0]
+    weight = _weight_path(model, run_dir)
+    encoder = model["engine"].split("_")[-1] if model["engine"].startswith("unet") else "resnet50"
+    arch = "DeepLabV3Plus" if model["engine"].startswith("deeplab") else "Unet"
+    m = smp.create_model(arch, encoder_name=encoder, encoder_weights=None,
+                         classes=n_classes + 1, in_channels=3)
+    m.load_state_dict(torch.load(weight, map_location="cpu"))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m.to(device).eval()
+
+    img = cv2.imdecode(np.fromfile(str(img_path), dtype="uint8"), cv2.IMREAD_COLOR)
+    orig_h, orig_w = img.shape[:2]
+    if isinstance(imgsz, (list, tuple)):
+        ih, iw = int(imgsz[1]), int(imgsz[0])
+    else:
+        ih = iw = int(imgsz)
+    resized = cv2.resize(img, (iw, ih))
+    x = torch.from_numpy(np.ascontiguousarray(resized.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]).to(device)
+    with torch.no_grad():
+        pred = m(x).argmax(dim=1)[0].cpu().numpy().astype(np.uint8)
+    pred = cv2.resize(pred, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+
+    def _bgr(hex_color):
+        h = hex_color.lstrip("#")
+        return (int(h[4:6], 16), int(h[2:4], 16), int(h[0:2], 16)) if len(h) == 6 else (0, 180, 255)
+    overlay = img.copy()
+    for i, c in enumerate(cats):
+        overlay[pred == i + 1] = _bgr(c["color"])
+    cv2.imencode(".jpg", np.hstack([img, overlay]))[1].tofile(out_path)
+
+
 def _predict_segment(model, img_path: Path, out_path: Path, imgsz: int, cats):
     """segment：ONNX 会话推理 → argmax → 类别色叠加。"""
     import onnxruntime as ort
     import torch.nn.functional as F
 
-    img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+    img = cv2.imdecode(np.fromfile(str(img_path), dtype="uint8"), cv2.IMREAD_COLOR)
     orig_h, orig_w = img.shape[:2]
     if isinstance(imgsz, (list, tuple)):
         ih, iw = int(imgsz[1]), int(imgsz[0])

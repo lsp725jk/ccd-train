@@ -43,8 +43,7 @@ const expandRows = computed(() => {
   return items.map((b, i) => ({
     idx: i + 1,
     category: b.category || '-',
-    confidence: b.confidence != null ? b.confidence : (b.score != null ? b.score : '-'),
-    score: b.score != null ? b.score : '-',
+    score: b.confidence != null ? b.confidence : (b.area_ratio != null ? b.area_ratio + '%' : (b.score != null ? b.score : '-')),
     bbox: b.bbox ? `(${b.bbox[0]}, ${b.bbox[1]}) → (${b.bbox[2]}, ${b.bbox[3]})` : '-',
     area_px: b.area_px != null ? b.area_px : '-',
     area_ratio: b.area_ratio != null ? b.area_ratio + '%' : '-',
@@ -161,8 +160,7 @@ const modelColumns = computed(() => {
 const predictionColumns = [
   { title: '#', key: 'idx', width: 50 },
   { title: '类型', key: 'category', width: 110 },
-  { title: '置信度', key: 'confidence', width: 90 },
-  { title: '得分', key: 'score', width: 80 },
+  { title: '置信度/得分', key: 'score', width: 110 },
   { title: '位置 (x1,y1)→(x2,y2)', key: 'bbox', minWidth: 220 },
   { title: '中心点', key: 'center', width: 130 },
   { title: '面积(px)', key: 'area_px', width: 90 },
@@ -181,8 +179,11 @@ const predictionColumns = [
                   :row-props="(row) => ({ style: selected && selected.id === row.id ? 'cursor:pointer;background:var(--bg-hover)' : 'cursor:pointer', onClick: () => pick(row) })" />
 
     <div class="card">
-      <div style="font-weight:600;margin-bottom:10px;font-size:0.95rem">
+      <div style="font-weight:600;margin-bottom:2px;font-size:0.95rem">
         {{ selected ? `${friendlyName(selected.name)} 可视化` : '选择模型查看可视化' }}
+      </div>
+      <div v-if="selected" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:10px">
+        以下均为<b>模型预测结果</b>（原图 + 模型预测叠加/曲线），不是您在标注页画的人工标注
       </div>
       <n-image-group v-if="result?.viz?.length">
         <div class="viz-grid">
