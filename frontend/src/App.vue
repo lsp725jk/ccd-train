@@ -47,8 +47,16 @@ const projectMenus = computed(() => {
   if (!pid.value) return []
   return routes
     .filter(r => r.meta?.menu && r.meta?.project)
-    .map(r => ({ path: `/projects/${pid.value}/${r.name}`, label: r.meta.menu, icon: r.meta.icon }))
+    .map(r => ({ path: `/projects/${pid.value}/${r.name}`, label: r.meta.menu, icon: r.meta.icon, name: r.name }))
 })
+
+// 引导逻辑：按数据→训练→评估→部署 四阶段分组（侧栏即工作流向导）
+const STAGES = [
+  { title: '数据准备', names: ['dataset', 'labeling'] },
+  { title: '模型训练', names: ['preprocess', 'cluster', 'train'] },
+  { title: '评估分析', names: ['charts', 'results'] },
+  { title: '部署', names: ['models'] },
+]
 
 const activeMenu = computed(() => {
   if (route.name === 'projects') return '/'
@@ -62,10 +70,16 @@ const menuOptions = computed(() => {
     { label: '场景方案', key: '/scenes', icon: renderIcon(Compass) },
   ]
   if (pid.value) {
-    opts.push({
-      type: 'group', key: 'project', label: project.value?.name || '项目',
-      children: projectMenus.value.map(m => ({ label: m.label, key: m.path, icon: renderIcon(m.icon) })),
-    })
+    // 引导逻辑：按 数据→训练→评估→部署 四阶段分组（侧栏即工作流向导）
+    for (const stage of STAGES) {
+      const children = projectMenus.value.filter(m => m.name && stage.names.includes(m.name))
+      if (!children.length) continue
+      opts.push({
+        type: 'group', key: `stage_${stage.title}`,
+        label: stage.title,
+        children: children.map(c => ({ label: c.label, key: c.path, icon: renderIcon(c.icon) })),
+      })
+    }
   }
   return opts
 })

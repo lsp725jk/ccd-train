@@ -1,12 +1,19 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  NButton, NGrid, NGi, NMenu, NImage, NSelect, NInput, NInputNumber,
+  NForm, NFormItem, NSlider, NEmpty, NSpin, NModal, NColorPicker, NDivider,
+  NPagination,
+  useMessage, useDialog,
+} from 'naive-ui'
 import { api } from '../api'
 import DirectoryPicker from '../components/DirectoryPicker.vue'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
+const message = useMessage()
+const dialog = useDialog()
 
 const datasets = ref([])
 const current = ref(null)
@@ -33,6 +40,24 @@ const previewOpen = computed({
   get: () => !!preview.value,
   set: (v) => { if (!v) { preview.value = null; previewScale.value = 1; previewPanX.value = 0; previewPanY.value = 0 } },
 })
+
+const splitOptions = [
+  { label: '全部', value: '' },
+  { label: '训练集', value: 'train' },
+  { label: '验证集', value: 'val' },
+  { label: '测试集', value: 'test' },
+]
+
+const dsMenuOptions = computed(() => datasets.value.map(d => ({
+  key: d.id,
+  label: () => h('div', { style: 'display:flex;justify-content:space-between;width:100%' }, [
+    h('span', {}, d.name),
+    h('span', { style: 'color:var(--text-muted)' }, `${d.image_count} 张`),
+  ]),
+})))
+function onDsMenuChange(key) {
+  current.value = datasets.value.find(d => d.id === key) || null
+}
 
 function previewZoomBy(f) {
   previewScale.value = Math.min(8, Math.max(0.2, previewScale.value * f))
@@ -85,7 +110,7 @@ function onPreviewKeydown(e) {
   else if (e.key === '0') previewZoomReset()
 }
 
-// 弹窗打开时挂 window 键盘监听（el-dialog 的 @keydown 只在焦点在弹窗内才触发）
+// 弹窗打开时挂 window 键盘监听
 watch(previewOpen, (open) => {
   if (open) window.addEventListener('keydown', onPreviewKeydown)
   else window.removeEventListener('keydown', onPreviewKeydown)
@@ -113,6 +138,7 @@ const augDlg = ref(false)
 const augPipelines = ref([])
 const augForm = ref({ pipeline_id: null, copies: 3, name: '' })
 const augRunning = ref(false)
+const augPipelineOptions = computed(() => augPipelines.value.map(p => ({ label: p.name, value: p.id })))
 
 async function openAugDlg() {
   augPipelines.value = await api.pipelines.list(pid, 'aug')
@@ -121,17 +147,17 @@ async function openAugDlg() {
 }
 
 async function doAugment() {
-  if (!augForm.value.pipeline_id) return ElMessage.warning('请选择增强管线')
-  if (!augForm.value.name.trim()) return ElMessage.warning('请输入新数据集名称')
-  if (!current.value) return ElMessage.warning('请先选择数据集')
+  if (!augForm.value.pipeline_id) return message.warning('请选择增强管线')
+  if (!augForm.value.name.trim()) return message.warning('请输入新数据集名称')
+  if (!current.value) return message.warning('请先选择数据集')
   augRunning.value = true
   try {
     const r = await api.datasets.augment(current.value.id, { ...augForm.value })
-    ElMessage.success(`扩充完成：${r.images} 张图像，${r.annotations} 条标注`)
+    message.success(`扩充完成：${r.images} 张图像，${r.annotations} 条标注`)
     augDlg.value = false
     await loadDatasets()
   } catch (e) {
-    ElMessage.error(String(e.response?.data?.detail || e.message).slice(0, 200))
+    message.error(String(e.response?.data?.detail || e.message).slice(0, 200))
   } finally {
     augRunning.value = false
   }
@@ -142,8 +168,8 @@ async function loadCats() {
   cats.value = await api.projects.datasetCategories(current.value.id)
 }
 async function addCat() {
-  if (!newCat.value.trim()) return ElMessage.warning('请输入类别名称')
-  if (!current.value) return ElMessage.warning('请先选择数据集')
+  if (!newCat.value.trim()) return message.warning('请输入类别名称')
+  if (!current.value) return message.warning('请先选择数据集')
   const colors = ['#4E79A7', '#E15759', '#59A14F', '#F28E2B', '#B07AA1', '#76B7B2', '#EDC948']
   const c = await api.projects.addDatasetCategory(current.value.id, {
     name: newCat.value, color: colors[cats.value.length % colors.length],
@@ -151,33 +177,40 @@ async function addCat() {
   cats.value.push(c)
   newCat.value = ''
 }
-async function removeCat(c) {
-  try {
-    await ElMessageBox.confirm(
-      `删除类别「${c.name}」后，属于它的标注将变为未分类，确定删除？`,
-      '删除类别', { type: 'warning' },
-    )
-  } catch { return }  // 用户取消
-  await api.projects.removeCategory(c.id)
-  cats.value = cats.value.filter(x => x.id !== c.id)
-  ElMessage.success(`已删除类别「${c.name}」`)
+function removeCat(c) {
+  dialog.warning({
+    title: '删除类别',
+    content: `删除类别「${c.name}」后，属于它的标注将变为未分类，确定删除？`,
+    positiveText: '删除', negativeText: '取消',
+    onPositiveClick: async () => {
+      await api.projects.removeCategory(c.id)
+      cats.value = cats.value.filter(x => x.id !== c.id)
+      message.success(`已删除类别「${c.name}」`)
+    },
+  })
 }
 async function updateCatColor(c, color) {
   await api.projects.updateCategory(c.id, { color })
   c.color = color
 }
-async function removeDataset(d) {
-  await ElMessageBox.confirm(`删除数据集「${d.name}」？其图像、标注及引用它的训练任务将一并删除。`, '确认删除', { type: 'warning' })
-  await api.datasets.remove(d.id)
-  ElMessage.success('数据集已删除')
-  if (current.value?.id === d.id) current.value = null
-  await loadDatasets()
+function removeDataset(d) {
+  dialog.warning({
+    title: '确认删除',
+    content: `删除数据集「${d.name}」？其图像、标注及引用它的训练任务将一并删除。`,
+    positiveText: '删除', negativeText: '取消',
+    onPositiveClick: async () => {
+      await api.datasets.remove(d.id)
+      message.success('数据集已删除')
+      if (current.value?.id === d.id) current.value = null
+      await loadDatasets()
+    },
+  })
 }
 async function doImport() {
-  if (!impForm.value.path.trim()) return ElMessage.warning('请输入标注文件路径')
-  if (!current.value) return ElMessage.warning('请先选择数据集')
+  if (!impForm.value.path.trim()) return message.warning('请输入标注文件路径')
+  if (!current.value) return message.warning('请先选择数据集')
   const r = await api.annotations.importAnnotations(current.value.id, { ...impForm.value })
-  ElMessage.success(`导入完成，共 ${r.created} 条标注`)
+  message.success(`导入完成，共 ${r.created} 条标注`)
   impDlg.value = false
   impForm.value = { format: 'yolo', path: '' }
 }
@@ -212,10 +245,10 @@ onMounted(async () => {
 
 async function create() {
   if (!form.value.name.trim() || !form.value.root_path.trim()) {
-    return ElMessage.warning('请填写数据集名称和目录路径')
+    return message.warning('请填写数据集名称和目录路径')
   }
   await api.datasets.create({ project_id: pid, ...form.value })
-  ElMessage.success('数据集已导入')
+  message.success('数据集已导入')
   dlg.value = false
   form.value = { name: '', root_path: '' }
   await loadDatasets()
@@ -223,7 +256,7 @@ async function create() {
 
 async function doSplit() {
   const r = await api.datasets.split(current.value.id, splitForm.value)
-  ElMessage.success(r.message)
+  message.success(r.message)
   splitDlg.value = false
   await loadDatasets()
   const ds = await api.datasets.get(current.value.id)
@@ -236,27 +269,19 @@ async function doSplit() {
     <div class="page-head">
       <h2>数据集</h2>
       <div>
-        <el-button :disabled="!current" @click="splitDlg = true">划分训练集</el-button>
-        <el-button :disabled="!current" @click="openAugDlg">增强扩充</el-button>
-        <el-button :disabled="!current" @click="catDlg = true; loadCats()">缺陷类别</el-button>
-        <el-button :disabled="!current" @click="impDlg = true">导入标注</el-button>
-        <el-button type="primary" @click="dlg = true">导入数据集</el-button>
+        <n-button :disabled="!current" @click="splitDlg = true">划分训练集</n-button>
+        <n-button :disabled="!current" @click="openAugDlg">增强扩充</n-button>
+        <n-button :disabled="!current" @click="catDlg = true; loadCats()">缺陷类别</n-button>
+        <n-button :disabled="!current" @click="impDlg = true">导入标注</n-button>
+        <n-button type="primary" @click="dlg = true">导入数据集</n-button>
       </div>
     </div>
 
-    <el-row :gutter="16">
-      <el-col :span="7">
+    <n-grid :cols="24" :x-gap="16">
+      <n-gi :span="7">
         <div class="card" style="padding: 8px">
-          <el-menu style="border: none">
-            <el-menu-item v-for="d in datasets" :key="d.id" :class="{ active: current?.id === d.id }"
-                          @click="current = d">
-              <div style="display:flex;justify-content:space-between;width:100%">
-                <span>{{ d.name }}</span>
-                <span style="color:#8a8175">{{ d.image_count }} 张</span>
-              </div>
-            </el-menu-item>
-          </el-menu>
-          <div v-if="!datasets.length" style="padding:20px;color:#8a8175;text-align:center">
+          <n-menu :value="current?.id" :options="dsMenuOptions" style="border:none" @update:value="onDsMenuChange" />
+          <div v-if="!datasets.length" style="padding:20px;color:var(--text-muted);text-align:center">
             暂无数据集
           </div>
         </div>
@@ -268,145 +293,150 @@ async function doSplit() {
         </div>
         <div v-if="current" class="card" style="margin-top:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
           <span style="font-size:0.85rem;color:#4a433c">{{ current.name }}</span>
-          <el-button link type="danger" size="small" @click="removeDataset(current)">删除数据集</el-button>
+          <n-button text type="error" size="small" @click="removeDataset(current)">删除数据集</n-button>
         </div>
-      </el-col>
+      </n-gi>
 
-      <el-col :span="17">
+      <n-gi :span="17">
         <div class="card">
           <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
-            <el-select v-model="split" style="width:130px">
-              <el-option label="全部" value="" />
-              <el-option label="训练集" value="train" />
-              <el-option label="验证集" value="val" />
-              <el-option label="测试集" value="test" />
-            </el-select>
-            <span style="color:#8a8175;font-size:0.85rem">共 {{ total }} 张</span>
+            <n-select v-model:value="split" :options="splitOptions" style="width:130px" />
+            <span style="color:var(--text-muted);font-size:0.85rem">共 {{ total }} 张</span>
           </div>
-          <div v-loading="loading" style="min-height:200px">
-            <div v-if="images.length" class="img-grid">
-              <div v-for="img in images" :key="img.id" class="img-cell" @click="preview = img">
-                <el-image :src="api.files.imageUrl(img.id)" fit="cover" lazy>
-                  <template #placeholder><div class="img-ph">加载中…</div></template>
-                  <template #error><div class="img-ph err">加载失败</div></template>
-                </el-image>
-                <div class="img-meta">{{ img.width }}×{{ img.height }}</div>
+          <n-spin :show="loading" style="min-height:200px">
+            <template v-if="images.length">
+              <div class="img-grid">
+                <div v-for="img in images" :key="img.id" class="img-cell" @click="preview = img">
+                  <n-image :src="api.files.imageUrl(img.id)" object-fit="cover" preview-disabled>
+                    <template #placeholder><div class="img-ph">加载中…</div></template>
+                    <template #error><div class="img-ph err">加载失败</div></template>
+                  </n-image>
+                  <div class="img-meta">{{ img.width }}×{{ img.height }}</div>
+                </div>
               </div>
-            </div>
-            <el-empty v-else description="选择左侧数据集查看图像" />
-          </div>
+            </template>
+            <n-empty v-else description="选择左侧数据集查看图像" />
+          </n-spin>
           <div style="display:flex;justify-content:flex-end;margin-top:12px">
-            <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total"
-                           layout="prev, pager, next" small />
+            <n-pagination v-model:page="page" :page-size="pageSize" :item-count="total" size="small" />
           </div>
         </div>
-      </el-col>
-    </el-row>
+      </n-gi>
+    </n-grid>
 
-    <el-dialog v-model="dlg" title="导入数据集" width="560px">
-      <el-form label-width="80px">
-        <el-form-item label="名称">
-          <el-input v-model="form.name" placeholder="如：焊接板 A 线" />
-        </el-form-item>
-        <el-form-item label="目录路径">
-          <el-input v-model="form.root_path" placeholder="服务器上的图像目录" />
-        </el-form-item>
-      </el-form>
+    <n-modal v-model:show="dlg" preset="card" title="导入数据集" style="width:560px">
+      <n-form label-placement="left" label-width="80">
+        <n-form-item label="名称">
+          <n-input v-model:value="form.name" placeholder="如：焊接板 A 线" />
+        </n-form-item>
+        <n-form-item label="目录路径">
+          <n-input v-model:value="form.root_path" placeholder="服务器上的图像目录" />
+        </n-form-item>
+      </n-form>
       <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">从资源管理器选择</div>
       <DirectoryPicker v-model="form.root_path" @select="dlg = false" />
       <template #footer>
-        <el-button @click="dlg = false">取消</el-button>
-        <el-button type="primary" @click="create">导入</el-button>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <n-button @click="dlg = false">取消</n-button>
+          <n-button type="primary" @click="create">导入</n-button>
+        </div>
       </template>
-    </el-dialog>
+    </n-modal>
 
-    <el-dialog v-model="catDlg" :title="`缺陷类别管理：${current?.name || ''}`" width="440px">
+    <n-modal v-model:show="catDlg" preset="card" :title="`缺陷类别管理：${current?.name || ''}`" style="width:440px">
       <div v-if="cats.length" style="margin-bottom:10px">
         <div v-for="c in cats" :key="c.id" class="cat-mgr-row">
-          <el-color-picker :model-value="c.color" size="small"
-                           @active-change="color => color && (c.color = color)"
-                           @change="color => updateCatColor(c, color)" />
+          <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
+                          @complete="color => color && updateCatColor(c, color)" />
           <span style="flex:1">{{ c.name }}</span>
-          <el-button link type="danger" @click="removeCat(c)">删除</el-button>
+          <n-button text type="error" @click="removeCat(c)">删除</n-button>
         </div>
       </div>
-      <el-empty v-else description="暂无类别" :image-size="50" />
+      <n-empty v-else description="暂无类别" :image-size="50" />
       <div style="display:flex;gap:8px;margin-top:10px">
-        <el-input v-model="newCat" placeholder="新类别名，如：脏污" @keyup.enter="addCat" />
-        <el-button type="primary" @click="addCat">添加</el-button>
+        <n-input v-model:value="newCat" placeholder="新类别名，如：脏污" @keyup.enter="addCat" />
+        <n-button type="primary" @click="addCat">添加</n-button>
       </div>
-    </el-dialog>
+    </n-modal>
 
-    <el-dialog v-model="augDlg" title="增强扩充数据集" width="460px">
-      <el-form label-width="90px">
-        <el-form-item label="增强管线">
-          <el-select v-model="augForm.pipeline_id" style="width:100%">
-            <el-option v-for="p in augPipelines" :key="p.id" :value="p.id" :label="p.name" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="每图副本数">
-          <el-input-number v-model="augForm.copies" :min="1" :max="20" style="width:100%" />
-        </el-form-item>
-        <el-form-item label="新数据集名">
-          <el-input v-model="augForm.name" placeholder="如：线体A-扩充" />
-        </el-form-item>
-      </el-form>
-      <div style="color:#8a8175;font-size:0.8rem">
+    <n-modal v-model:show="augDlg" preset="card" title="增强扩充数据集" style="width:460px">
+      <n-form label-placement="left" label-width="90">
+        <n-form-item label="增强管线">
+          <n-select v-model:value="augForm.pipeline_id" :options="augPipelineOptions" style="width:100%" />
+        </n-form-item>
+        <n-form-item label="每图副本数">
+          <n-input-number v-model:value="augForm.copies" :min="1" :max="20" style="width:100%" />
+        </n-form-item>
+        <n-form-item label="新数据集名">
+          <n-input v-model:value="augForm.name" placeholder="如：线体A-扩充" />
+        </n-form-item>
+      </n-form>
+      <div style="color:var(--text-muted);font-size:0.8rem">
         每张图生成 N 个增强副本（标注同步变换），输出为新数据集，所有任务可用。
       </div>
       <template #footer>
-        <el-button @click="augDlg = false">取消</el-button>
-        <el-button type="primary" :loading="augRunning" @click="doAugment">开始扩充</el-button>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <n-button @click="augDlg = false">取消</n-button>
+          <n-button type="primary" :loading="augRunning" @click="doAugment">开始扩充</n-button>
+        </div>
       </template>
-    </el-dialog>
+    </n-modal>
 
-    <el-dialog v-model="impDlg" title="导入标注" width="460px">
-      <el-form label-width="80px">
-        <el-form-item label="格式">
-          <el-select v-model="impForm.format" style="width:100%">
-            <el-option v-for="f in importFormats" :key="f.value" :value="f.value" :label="f.label" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="路径">
-          <el-input v-model="impForm.path" :placeholder="impForm.format === 'yolo' ? 'labels 目录路径，如 E:\\data\\labels' : impForm.format === 'labelme' ? 'JSON 目录或单文件路径' : 'annotations.json 路径'" />
-        </el-form-item>
-      </el-form>
+    <n-modal v-model:show="impDlg" preset="card" title="导入标注" style="width:460px">
+      <n-form label-placement="left" label-width="80">
+        <n-form-item label="格式">
+          <n-select v-model:value="impForm.format" :options="importFormats" style="width:100%" />
+        </n-form-item>
+        <n-form-item label="路径">
+          <n-input v-model:value="impForm.path" :placeholder="impForm.format === 'yolo' ? 'labels 目录路径，如 E:\\data\\labels' : impForm.format === 'labelme' ? 'JSON 目录或单文件路径' : 'annotations.json 路径'" />
+        </n-form-item>
+      </n-form>
       <template #footer>
-        <el-button @click="impDlg = false">取消</el-button>
-        <el-button type="primary" @click="doImport">导入</el-button>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <n-button @click="impDlg = false">取消</n-button>
+          <n-button type="primary" @click="doImport">导入</n-button>
+        </div>
       </template>
-    </el-dialog>
+    </n-modal>
 
-    <el-dialog v-model="splitDlg" title="划分训练 / 验证 / 测试集" width="440px">
-      <el-form label-width="110px">
-        <el-form-item label="训练集比例">
-          <el-slider v-model="splitForm.train_ratio" :min="0" :max="1" :step="0.05" show-input />
-        </el-form-item>
-        <el-form-item label="验证集比例">
-          <el-slider v-model="splitForm.val_ratio" :min="0" :max="1" :step="0.05" show-input />
-        </el-form-item>
-        <el-form-item label="随机种子">
-          <el-input-number v-model="splitForm.seed" :min="0" />
-        </el-form-item>
-        <div style="color:#8a8175;font-size:0.8rem">剩余部分自动归入测试集</div>
-      </el-form>
+    <n-modal v-model:show="splitDlg" preset="card" title="划分训练 / 验证 / 测试集" style="width:440px">
+      <n-form label-placement="left" label-width="110">
+        <n-form-item label="训练集比例">
+          <div style="display:flex;align-items:center;gap:8px;width:100%">
+            <n-slider v-model:value="splitForm.train_ratio" :min="0" :max="1" :step="0.05" style="flex:1" />
+            <n-input-number v-model:value="splitForm.train_ratio" :min="0" :max="1" :step="0.05" size="small" style="width:84px" />
+          </div>
+        </n-form-item>
+        <n-form-item label="验证集比例">
+          <div style="display:flex;align-items:center;gap:8px;width:100%">
+            <n-slider v-model:value="splitForm.val_ratio" :min="0" :max="1" :step="0.05" style="flex:1" />
+            <n-input-number v-model:value="splitForm.val_ratio" :min="0" :max="1" :step="0.05" size="small" style="width:84px" />
+          </div>
+        </n-form-item>
+        <n-form-item label="随机种子">
+          <n-input-number v-model:value="splitForm.seed" :min="0" style="width:100%" />
+        </n-form-item>
+      </n-form>
+      <div style="color:var(--text-muted);font-size:0.8rem">剩余部分自动归入测试集</div>
       <template #footer>
-        <el-button @click="splitDlg = false">取消</el-button>
-        <el-button type="primary" @click="doSplit">划分</el-button>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <n-button @click="splitDlg = false">取消</n-button>
+          <n-button type="primary" @click="doSplit">划分</n-button>
+        </div>
       </template>
-    </el-dialog>
+    </n-modal>
 
-    <el-dialog v-model="previewOpen" :title="preview?.rel_path" width="78%" top="3vh">
+    <n-modal v-model:show="previewOpen" preset="card" :title="preview?.rel_path" style="width:78%">
       <template v-if="preview">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <el-button size="small" @click="previewZoomBy(1.25)">＋</el-button>
-          <span style="font-size:0.85rem;color:#8a8175;min-width:48px;text-align:center">{{ Math.round(previewScale * 100) }}%</span>
-          <el-button size="small" @click="previewZoomBy(0.8)">－</el-button>
-          <el-button size="small" @click="previewFit">适应</el-button>
-          <el-divider direction="vertical" />
-          <el-button size="small" @click="previewNext(-1)">◀ 上一张</el-button>
-          <el-button size="small" @click="previewNext(1)">下一张 ▶</el-button>
-          <span style="font-size:0.8rem;color:#8a8175;margin-left:4px">
+          <n-button size="small" @click="previewZoomBy(1.25)">＋</n-button>
+          <span style="font-size:0.85rem;color:var(--text-muted);min-width:48px;text-align:center">{{ Math.round(previewScale * 100) }}%</span>
+          <n-button size="small" @click="previewZoomBy(0.8)">－</n-button>
+          <n-button size="small" @click="previewFit">适应</n-button>
+          <n-divider vertical />
+          <n-button size="small" @click="previewNext(-1)">◀ 上一张</n-button>
+          <n-button size="small" @click="previewNext(1)">下一张 ▶</n-button>
+          <span style="font-size:0.8rem;color:var(--text-muted);margin-left:4px">
             {{ images.findIndex(im => im.id === preview.id) + 1 }} / {{ images.length }}
           </span>
         </div>
@@ -416,13 +446,13 @@ async function doSplit() {
           <img ref="previewImgRef" :src="api.files.imageUrl(preview.id)"
                :style="{ transform: `translate(${previewPanX}px, ${previewPanY}px) scale(${previewScale})`, transformOrigin: '0 0' }" />
         </div>
-        <div style="margin-top:6px;font-size:0.78rem;color:#8a8175;display:flex;gap:12px">
+        <div style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);display:flex;gap:12px">
           <span>{{ preview.width }} × {{ preview.height }}</span>
           <span v-if="preview.split">分区：{{ preview.split }}</span>
           <span>标注：{{ preview.annotation_count || 0 }} 条</span>
         </div>
       </template>
-    </el-dialog>
+    </n-modal>
   </div>
 </template>
 
@@ -434,16 +464,18 @@ async function doSplit() {
 }
 .img-cell {
   position: relative;
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
   cursor: pointer;
   aspect-ratio: 1;
 }
-.img-cell .el-image { width: 100%; height: 100%; }
+.img-cell .n-image { width: 100%; height: 100%; display: block; position: relative; }
+/* n-image 内部 img 需强制填满容器（否则按原始尺寸渲染只露出角落） */
+.img-cell .n-image :deep(img) { width: 100% !important; height: 100% !important; object-fit: cover; position: absolute; inset: 0; }
 .img-ph {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  background: #f2ecdd; color: #a89f92; font-size: 0.72rem;
+  background: var(--bg-hover); color: var(--text-muted); font-size: 0.72rem;
 }
 .img-ph.err { color: #c07; }
 .img-meta {
@@ -453,16 +485,15 @@ async function doSplit() {
   color: #fff; font-size: 0.7rem;
   padding: 2px 6px;
 }
-.active { background: #eef3ee !important; }
 .cat-mgr-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 6px 4px; border-bottom: 0.5px solid #d8cfbe;
+  padding: 6px 4px; border-bottom: 0.5px solid var(--border);
   font-size: 0.9rem;
 }
 .preview-viewport {
   overflow: hidden; max-height: 64vh;
   background: #2a2622; border-radius: 4px;
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
 }
 .preview-viewport img {
   display: block; max-width: none;
