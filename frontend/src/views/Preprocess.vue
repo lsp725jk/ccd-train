@@ -1,12 +1,16 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import {
+  NButton, NCheckbox, NEmpty, NGrid, NGi, NInput, NModal,
+  NRadioButton, NRadioGroup, NSelect, useMessage,
+} from 'naive-ui'
 import { api } from '../api'
 import OpForm from '../components/OpForm.vue'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
+const message = useMessage()
 
 const tab = ref('preprocess')
 const opsLib = ref({ pre: [], aug: [] })
@@ -31,6 +35,8 @@ const previewGridW = computed(() => {
   return previewW.value * cols + 10 * (cols - 1)
 })
 const previewZoomLabel = computed(() => Math.round(previewScale.value * 100) + '%')
+const imageOptions = computed(() => images.value.map(img => ({ value: img.id, label: img.rel_path })))
+const pipelineNameOptions = computed(() => pipelines.value.map(p => ({ value: p.name, label: p.name })))
 
 watch([previewImg, soloImgs], async () => {
   const any = previewImg.value || soloImgs.value.length
@@ -137,7 +143,7 @@ function refresh() {
       previewImg.value = ''
       soloImgs.value = []
       const detail = e.response?.data?.detail || e.message || '预览失败'
-      ElMessage.error(String(detail).slice(0, 200))
+      message.error(String(detail).slice(0, 200))
     } finally {
       previewing.value = false
     }
@@ -160,14 +166,14 @@ function loadPipeline(p) {
   refresh()
 }
 async function savePipeline() {
-  if (!saveName.value.trim()) return ElMessage.warning('请输入管线名称')
+  if (!saveName.value.trim()) return message.warning('请输入管线名称')
   await api.pipelines.create({
     project_id: pid,
     name: saveName.value,
     ops: pipeline.value.map(o => ({ name: o.name, params: o.params, enabled: o.enabled })),
     type: tab.value === 'augment' ? 'aug' : 'pre',
   })
-  ElMessage.success('管线已保存')
+  message.success('管线已保存')
   saveDlg.value = false
   saveName.value = ''
   loadPipelines()
@@ -182,20 +188,18 @@ async function removePipeline(p) {
   <div>
     <div class="page-head">
       <h2>预处理 · 增强工作台</h2>
-      <el-radio-group v-model="tab" size="small" @change="switchTab">
-        <el-radio-button value="preprocess">预处理</el-radio-button>
-        <el-radio-button value="augment">数据增强</el-radio-button>
-      </el-radio-group>
+      <n-radio-group v-model:value="tab" size="small" @update:value="switchTab">
+        <n-radio-button value="preprocess">预处理</n-radio-button>
+        <n-radio-button value="augment">数据增强</n-radio-button>
+      </n-radio-group>
     </div>
 
-    <el-row :gutter="16">
+    <n-grid :cols="24" :x-gap="16">
       <!-- 左：图像选择 + 算子库 -->
-      <el-col :span="7">
+      <n-gi :span="7">
         <div class="card" style="margin-bottom:12px">
           <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">预览图像</div>
-          <el-select v-model="imageId" filterable placeholder="选择图像" style="width:100%">
-            <el-option v-for="img in images" :key="img.id" :value="img.id" :label="img.rel_path" />
-          </el-select>
+          <n-select v-model:value="imageId" filterable :options="imageOptions" placeholder="选择图像" style="width:100%" />
         </div>
         <div class="card">
           <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">
@@ -207,46 +211,45 @@ async function removePipeline(p) {
             </div>
           </div>
         </div>
-      </el-col>
+      </n-gi>
 
       <!-- 中：管线 -->
-      <el-col :span="8">
+      <n-gi :span="8">
         <div class="card" style="min-height:560px;display:flex;flex-direction:column">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-weight:600;font-size:0.9rem">
               当前管线（{{ pipeline.length }} 步）
             </span>
             <div>
-              <el-button size="small" @click="saveDlg = true" :disabled="!pipeline.length">保存</el-button>
-              <el-button size="small" @click="clearOps" :disabled="!pipeline.length">清空</el-button>
+              <n-button size="small" @click="saveDlg = true" :disabled="!pipeline.length">保存</n-button>
+              <n-button size="small" @click="clearOps" :disabled="!pipeline.length">清空</n-button>
             </div>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
-            <el-select v-model="saveName" placeholder="加载已存管线" size="small" style="flex:1"
-                       @change="p => { const found = pipelines.find(x => x.name === p); if (found) loadPipeline(found) }">
-              <el-option v-for="p in pipelines" :key="p.id" :value="p.name" :label="p.name" />
-            </el-select>
-            <el-button v-if="saveName" size="small" link type="danger" @click="removePipeline(pipelines.find(x => x.name === saveName))">
+            <n-select v-model:value="saveName" placeholder="加载已存管线" size="small" style="flex:1"
+                       :options="pipelineNameOptions"
+                       @update:value="p => { const found = pipelines.find(x => x.name === p); if (found) loadPipeline(found) }" />
+            <n-button v-if="saveName" size="small" text type="error" @click="removePipeline(pipelines.find(x => x.name === saveName))">
               删除
-            </el-button>
+            </n-button>
           </div>
           <div v-if="pipeline.length" style="flex:1;overflow-y:auto">
             <div v-for="(op, i) in pipeline" :key="i" class="pipe-item"
                  :class="{ on: selected === i, off: !op.enabled }" @click="selected = i">
-              <el-checkbox :model-value="op.enabled" size="small" @click.stop="op.enabled = !op.enabled; refresh()" />
+              <n-checkbox :checked="op.enabled" size="small" @click.stop="op.enabled = !op.enabled; refresh()" />
               <span style="color:#4a6b4a;font-variant-numeric:tabular-nums">{{ i + 1 }}</span>
               <span style="flex:1;padding:0 6px">{{ op.label }}</span>
-              <el-button link size="small" :disabled="i === 0" @click.stop="moveOp(i, -1)">↑</el-button>
-              <el-button link size="small" :disabled="i === pipeline.length - 1" @click.stop="moveOp(i, 1)">↓</el-button>
-              <el-button link size="small" type="danger" @click.stop="removeOp(i)">×</el-button>
+              <n-button text size="small" :disabled="i === 0" @click.stop="moveOp(i, -1)">↑</n-button>
+              <n-button text size="small" :disabled="i === pipeline.length - 1" @click.stop="moveOp(i, 1)">↓</n-button>
+              <n-button text size="small" type="error" @click.stop="removeOp(i)">×</n-button>
             </div>
           </div>
-          <el-empty v-else description="点击左侧算子添加步骤" :image-size="70" />
+          <n-empty v-else description="点击左侧算子添加步骤" :image-size="70" />
         </div>
-      </el-col>
+      </n-gi>
 
       <!-- 右：参数 + 预览 -->
-      <el-col :span="9">
+      <n-gi :span="9">
         <div class="card" style="margin-bottom:12px">
           <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">
             {{ selectedOp ? selectedOp.label + ' 参数' : '参数' }}
@@ -258,15 +261,15 @@ async function removePipeline(p) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-weight:600;font-size:0.9rem">效果预览</span>
             <div style="display:flex;gap:6px;align-items:center">
-              <el-radio-group v-model="previewMode" size="small" @change="refresh">
-                <el-radio-button value="combo">组合</el-radio-button>
-                <el-radio-button value="solo">逐个</el-radio-button>
-              </el-radio-group>
+              <n-radio-group v-model:value="previewMode" size="small" @update:value="refresh">
+                <n-radio-button value="combo">组合</n-radio-button>
+                <n-radio-button value="solo">逐个</n-radio-button>
+              </n-radio-group>
               <span v-if="previewing" style="color:#8a8175;font-size:0.8rem">处理中…</span>
               <span style="font-size:0.8rem;color:#8a8175">{{ previewZoomLabel }}</span>
-              <el-button size="small" @click="previewZoomBy(1.25)">＋</el-button>
-              <el-button size="small" @click="previewZoomBy(0.8)">－</el-button>
-              <el-button size="small" @click="previewZoomReset">适应</el-button>
+              <n-button size="small" @click="previewZoomBy(1.25)">＋</n-button>
+              <n-button size="small" @click="previewZoomBy(0.8)">－</n-button>
+              <n-button size="small" @click="previewZoomReset">适应</n-button>
             </div>
           </div>
           <div v-if="previewImg || soloImgs.length" class="preview-scroll" @wheel.prevent="previewOnWheel">
@@ -294,55 +297,59 @@ async function removePipeline(p) {
               </div>
             </div>
           </div>
-          <el-empty v-else description="添加算子后自动预览" :image-size="70" />
+          <n-empty v-else description="添加算子后自动预览" :image-size="70" />
         </div>
-      </el-col>
-    </el-row>
+      </n-gi>
+    </n-grid>
 
-    <el-dialog v-model="saveDlg" title="保存管线" width="380px">
-      <el-input v-model="saveName" placeholder="管线名称，如：低对比增强" @keyup.enter="savePipeline" />
+    <n-modal v-model:show="saveDlg" preset="card" title="保存管线" style="width:380px">
+      <n-input v-model:value="saveName" placeholder="管线名称，如：低对比增强" @keyup.enter="savePipeline" />
       <template #footer>
-        <el-button @click="saveDlg = false">取消</el-button>
-        <el-button type="primary" @click="savePipeline">保存</el-button>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <n-button @click="saveDlg = false">取消</n-button>
+          <n-button type="primary" @click="savePipeline">保存</n-button>
+        </div>
       </template>
-    </el-dialog>
+    </n-modal>
   </div>
 </template>
 
 <style scoped>
 .op-item {
   padding: 7px 10px;
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
   border-radius: 4px;
   margin-bottom: 6px;
   cursor: pointer;
   font-size: 0.85rem;
-  background: #fbf8f1;
+  background: var(--bg-surface);
+  color: var(--el-text-color-primary);
   transition: background 0.15s;
 }
-.op-item:hover { background: #eef3ee; border-color: #4a6b4a; }
+.op-item:hover { background: var(--bg-hover); border-color: var(--el-color-primary); }
 .pipe-item {
   display: flex;
   align-items: center;
   padding: 7px 8px;
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
   border-radius: 4px;
   margin-bottom: 6px;
   cursor: pointer;
   font-size: 0.85rem;
-  background: #fbf8f1;
+  background: var(--bg-surface);
+  color: var(--el-text-color-primary);
 }
-.pipe-item.on { border-color: #4a6b4a; background: #eef3ee; }
+.pipe-item.on { border-color: var(--el-color-primary); background: var(--bg-hover); }
 .pipe-item.off { opacity: 0.45; }
 .preview-scroll {
   overflow: auto;
   max-height: 480px;
-  border: 1px solid #d8cfbe;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: #2a2622;
+  background: var(--bg-accent);
   padding: 8px;
 }
 .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.preview-cap { font-size: 0.78rem; color: #8a8175; margin-bottom: 4px; }
-.preview-img { border-radius: 4px; border: 1px solid #d8cfbe; max-width: none; }
+.preview-cap { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px; }
+.preview-img { border-radius: 4px; border: 1px solid var(--border); max-width: none; }
 </style>

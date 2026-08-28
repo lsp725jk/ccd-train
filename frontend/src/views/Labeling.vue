@@ -1,20 +1,26 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  NButton, NCheckbox, NColorPicker, NEmpty, NGi, NGrid, NIcon, NImage,
+  NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSpin, NSwitch,
+  useDialog, useMessage,
+} from 'naive-ui'
 import { api } from '../api'
 import { hexToRGBA, pointInPolygon } from '../utils/labeling'
 import { ArrowLeft, ArrowRight, FullScreen, ZoomIn, ZoomOut, Check, Delete, Plus, Close } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
+const message = useMessage()
+const dialog = useDialog()
 
 // ---- 数据 ----
 const datasets = ref([])
 const categories = ref([])
 const images = ref([])
 const imageIdx = ref(0)
-const current = ref(null)        // 当前数据集（el-select 绑定）
+const current = ref(null)        // 当前数据集（n-select 绑定）
 const currentImage = ref(null)   // 当前图像（切换图片时只改这里）
 const anns = ref([])
 const loading = ref(false)
@@ -499,7 +505,7 @@ function onMouseDown(e) {
   if (mode.value === 'eraser') {
     const p = toImgCoord(e)
     const hit = hitMask(p)
-    if (!hit) return ElMessage.info('橡皮擦：按住鼠标在要擦除的掩码区域上涂抹')
+    if (!hit) return message.info('橡皮擦：按住鼠标在要擦除的掩码区域上涂抹')
     editingId.value = hit
     brushRaw = [p]
     brushing.value = true
@@ -623,7 +629,7 @@ async function onMouseUp(e) {
     const cx = d.start.x, cy = d.start.y
     const rx = Math.abs(d.cur.x - d.start.x), ry = Math.abs(d.cur.y - d.start.y)
     if (rx < 3 || ry < 3) { renderOverlay(); return }
-    if (!catId.value) return ElMessage.warning('请先在左侧选择缺陷类别')
+    if (!catId.value) return message.warning('请先在左侧选择缺陷类别')
     // 椭圆 → 多边形（后端复用 X-AnyLabeling 几何算法）
     let pts = []
     try {
@@ -654,7 +660,7 @@ async function onMouseUp(e) {
   const x1 = Math.min(d.x1, d.x2), y1 = Math.min(d.y1, d.y2)
   const x2 = Math.max(d.x1, d.x2), y2 = Math.max(d.y1, d.y2)
   if (x2 - x1 < 3 || y2 - y1 < 3) return
-  if (!catId.value) return ElMessage.warning('请先在左侧选择缺陷类别')
+  if (!catId.value) return message.warning('请先在左侧选择缺陷类别')
   const a = await api.annotations.create({
     image_id: currentImage.value.id, category_id: catId.value,
     type: 'box', data: { x1, y1, x2, y2 }, source: 'manual',
@@ -665,7 +671,7 @@ async function onMouseUp(e) {
 
 async function submitBrush() {
   if (brushRaw.length < 2) return
-  if (!catId.value) return ElMessage.warning('请先选择缺陷类别')
+  if (!catId.value) return message.warning('请先选择缺陷类别')
   const pts = brushRaw.map(p => [p.x, p.y])
   try {
     if (editingId.value) {
@@ -688,11 +694,11 @@ async function submitBrush() {
       })
       anns.value.push(a)
       if (isShield) {
-        ElMessage.success('屏蔽区已创建（该区域不参与训练）')
+        message.success('屏蔽区已创建（该区域不参与训练）')
       } else {
         // 创建后自动进入逐像素编辑：后续涂抹直接 paint 像素级更新
         editingId.value = a.id
-        ElMessage.success('掩码已创建，继续涂抹为逐像素编辑')
+        message.success('掩码已创建，继续涂抹为逐像素编辑')
       }
       refreshBadge(1)
     }
@@ -718,7 +724,7 @@ function hitMask(p, onlyId = null) {
 
 // ---- SAM 智能标注 ----
 async function runSam() {
-  if (!catId.value) return ElMessage.warning('请先选择缺陷类别')
+  if (!catId.value) return message.warning('请先选择缺陷类别')
   if (!samBox.value && !samPoints.value.length && !samNegPoints.value.length) {
     samPreview.value = []
     renderOverlay()
@@ -742,8 +748,8 @@ async function runSam() {
 }
 
 async function confirmSam() {
-  if (!catId.value) return ElMessage.warning('请先选择缺陷类别')
-  if (!samPreview.value.length) return ElMessage.info('还没有预览结果，先画框或点击添加提示')
+  if (!catId.value) return message.warning('请先选择缺陷类别')
+  if (!samPreview.value.length) return message.info('还没有预览结果，先画框或点击添加提示')
   const n = samPreview.value.length
   for (const pts of samPreview.value) {
     const a = await api.annotations.create({
@@ -754,7 +760,7 @@ async function confirmSam() {
   }
   refreshBadge(n)
   clearSam()
-  ElMessage.success(`已生成 ${n} 个掩码`)
+  message.success(`已生成 ${n} 个掩码`)
 }
 
 function clearSam() {
@@ -776,7 +782,7 @@ function onSamContext(e) {
 
 async function onCanvasClick(e) {
   if (mode.value === 'class') {
-    if (!catId.value) return ElMessage.warning('请先选择缺陷类别')
+    if (!catId.value) return message.warning('请先选择缺陷类别')
     const old = anns.value.find(a => a.type === 'class')
     if (old) {
       await api.annotations.update(old.id, { category_id: catId.value })
@@ -797,8 +803,8 @@ async function onCanvasClick(e) {
 async function finishPolygon() {
   if (mode.value !== 'polygon') return
   const pts = polyPts.value
-  if (pts.length < 3) return ElMessage.info('多边形至少需要 3 个点')
-  if (!catId.value) return ElMessage.warning('请先在左侧选择缺陷类别')
+  if (pts.length < 3) return message.info('多边形至少需要 3 个点')
+  if (!catId.value) return message.warning('请先在左侧选择缺陷类别')
   const a = await api.annotations.create({
     image_id: currentImage.value.id, category_id: catId.value,
     type: 'mask', data: { points: pts.map(p => [p[0], p[1]]) }, source: 'manual',
@@ -836,8 +842,8 @@ async function changeCat(ann, cid) {
 }
 
 async function addNewCat() {
-  if (!newCatName.value.trim()) return ElMessage.warning('请输入类别名称')
-  if (!current.value) return ElMessage.warning('请先选择数据集')
+  if (!newCatName.value.trim()) return message.warning('请输入类别名称')
+  if (!current.value) return message.warning('请先选择数据集')
   const c = await api.projects.addDatasetCategory(current.value.id, {
     name: newCatName.value, color: newCatColor.value,
   })
@@ -847,18 +853,19 @@ async function addNewCat() {
   newCatColor.value = CAT_PALETTE[categories.value.length % CAT_PALETTE.length]
 }
 
-async function removeCat(c) {
-  try {
-    await ElMessageBox.confirm(
-      `删除类别「${c.name}」后，属于它的标注将变为未分类，确定删除？`,
-      '删除类别', { type: 'warning' },
-    )
-  } catch { return }
-  await api.projects.removeCategory(c.id)
-  categories.value = categories.value.filter(x => x.id !== c.id)
-  if (catId.value === c.id) catId.value = categories.value[0]?.id || null
-  // 当前图标注类别失效，重载
-  if (currentImage.value) await loadAnns()
+function removeCat(c) {
+  dialog.warning({
+    title: '删除类别',
+    content: `删除类别「${c.name}」后，属于它的标注将变为未分类，确定删除？`,
+    positiveText: '删除', negativeText: '取消',
+    onPositiveClick: async () => {
+      await api.projects.removeCategory(c.id)
+      categories.value = categories.value.filter(x => x.id !== c.id)
+      if (catId.value === c.id) catId.value = categories.value[0]?.id || null
+      // 当前图标注类别失效，重载
+      if (currentImage.value) await loadAnns()
+    },
+  })
 }
 
 async function updateCatColor(c, color) {
@@ -930,6 +937,9 @@ const groupedAnns = computed(() => {
   return [...map.values()]
 })
 
+const datasetOptions = computed(() => datasets.value.map(d => ({ label: d.name, value: d })))
+const categoryOptions = computed(() => categories.value.map(c => ({ label: c.name, value: c.id })))
+
 const imgUrl = ref('')
 </script>
 
@@ -938,16 +948,15 @@ const imgUrl = ref('')
     <div class="page-head">
       <h2>标注工作台</h2>
       <div style="display:flex;gap:8px;align-items:center">
-        <el-select v-model="current" style="width:150px" @change="loadImages">
-          <el-option v-for="d in datasets" :key="d.id" :value="d" :label="d.name" />
-        </el-select>
-        <el-checkbox v-model="unlabeledFirst" @change="loadImages">未标注优先</el-checkbox>
+        <n-select v-model:value="current" :options="datasetOptions" style="width:150px"
+                  @update:value="loadImages" />
+        <n-checkbox v-model:checked="unlabeledFirst" @update:checked="loadImages">未标注优先</n-checkbox>
       </div>
     </div>
 
-    <el-row :gutter="16">
+    <n-grid :cols="24" :x-gap="16">
       <!-- 左：类别 + 图像列表 -->
-      <el-col :span="6">
+      <n-gi :span="6">
         <div class="card" style="margin-bottom:12px">
           <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">缺陷类别</div>
           <div v-if="!categories.length" style="color:#8b2c1f;font-size:0.82rem;margin-bottom:6px">
@@ -955,16 +964,15 @@ const imgUrl = ref('')
           </div>
           <div class="cat-row" v-for="c in categories" :key="c.id" @click="catId = c.id"
                :class="{ on: catId === c.id }">
-            <el-color-picker :model-value="c.color" size="small"
-                             @active-change="color => color && (c.color = color)"
-                             @change="color => updateCatColor(c, color)" />
+            <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
+                            @complete="color => color && updateCatColor(c, color)" />
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis">{{ c.name }}</span>
-            <el-button link size="small" type="danger" @click.stop="removeCat(c)"><el-icon><Close /></el-icon></el-button>
+            <n-button text size="small" type="error" @click.stop="removeCat(c)"><n-icon><Close /></n-icon></n-button>
           </div>
           <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
-            <el-color-picker v-model="newCatColor" size="small" />
-            <el-input v-model="newCatName" placeholder="新建标签" size="small" @keyup.enter="addNewCat" />
-            <el-button size="small" type="primary" @click="addNewCat"><el-icon><Plus /></el-icon></el-button>
+            <n-color-picker v-model:value="newCatColor" size="small" :modes="['hex']" :show-alpha="false" />
+            <n-input v-model:value="newCatName" placeholder="新建标签" size="small" @keyup.enter="addNewCat" />
+            <n-button size="small" type="primary" @click="addNewCat"><n-icon><Plus /></n-icon></n-button>
           </div>
           <div style="color:#8a8175;font-size:0.75rem;margin-top:6px">
             类别属于当前数据集（{{ current?.name }}），删除后标注将变为未分类
@@ -978,39 +986,42 @@ const imgUrl = ref('')
           <div style="max-height:520px;overflow-y:auto">
             <div v-for="(im, i) in images" :key="im.id" class="img-row" :class="{ on: i === imageIdx }"
                  @click="imageIdx = i; selectImage()">
-              <el-image :src="api.files.imageUrl(im.id)" fit="cover" style="width:44px;height:44px;border-radius:4px" lazy />
+              <n-image :src="api.files.imageUrl(im.id)" object-fit="cover" preview-disabled
+                       style="width:44px;height:44px;border-radius:4px" />
               <span style="flex:1;font-size:0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ im.rel_path }}</span>
               <span class="badge" :class="im.annotation_count ? 'done' : ''">{{ im.annotation_count || 0 }}</span>
             </div>
           </div>
         </div>
-      </el-col>
+      </n-gi>
 
       <!-- 中：画布 -->
-      <el-col :span="13">
+      <n-gi :span="13">
         <div class="card">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-            <el-radio-group v-model="mode" size="small">
-              <el-radio-button value="box">画框</el-radio-button>
-              <el-radio-button value="polygon">多边形</el-radio-button>
-              <el-radio-button value="ellipse">椭圆</el-radio-button>
-              <el-radio-button value="class">分类</el-radio-button>
-              <el-radio-button value="sam">SAM 掩码</el-radio-button>
-              <el-radio-button value="brush">画笔</el-radio-button>
-              <el-radio-button value="eraser">橡皮擦</el-radio-button>
-              <el-radio-button value="shield">掩膜</el-radio-button>
-              <el-radio-button value="pan">平移</el-radio-button>
-            </el-radio-group>
+            <n-radio-group v-model:value="mode" size="small">
+              <n-radio-button value="box">画框</n-radio-button>
+              <n-radio-button value="polygon">多边形</n-radio-button>
+              <n-radio-button value="ellipse">椭圆</n-radio-button>
+              <n-radio-button value="class">分类</n-radio-button>
+              <n-radio-button value="sam">SAM 掩码</n-radio-button>
+              <n-radio-button value="brush">画笔</n-radio-button>
+              <n-radio-button value="eraser">橡皮擦</n-radio-button>
+              <n-radio-button value="shield">掩膜</n-radio-button>
+              <n-radio-button value="pan">平移</n-radio-button>
+            </n-radio-group>
             <template v-if="mode === 'sam'">
-              <el-button size="small" type="primary" @click="confirmSam" :loading="samLoading"><el-icon><Check /></el-icon><span style="margin-left:3px">确认掩码</span></el-button>
-              <el-button size="small" @click="clearSam"><el-icon><Delete /></el-icon><span style="margin-left:3px">清空</span></el-button>
+              <n-button size="small" type="primary" @click="confirmSam" :loading="samLoading"><n-icon><Check /></n-icon><span style="margin-left:3px">确认掩码</span></n-button>
+              <n-button size="small" @click="clearSam"><n-icon><Delete /></n-icon><span style="margin-left:3px">清空</span></n-button>
             </template>
             <template v-if="mode === 'polygon'">
-              <el-button size="small" type="primary" :disabled="polyPts.length < 3" @click="finishPolygon"><el-icon><Check /></el-icon><span style="margin-left:3px">完成多边形</span></el-button>
-              <el-button size="small" @click="polyPts = []; renderOverlay()"><el-icon><Delete /></el-icon><span style="margin-left:3px">清空</span></el-button>
+              <n-button size="small" type="primary" :disabled="polyPts.length < 3" @click="finishPolygon"><n-icon><Check /></n-icon><span style="margin-left:3px">完成多边形</span></n-button>
+              <n-button size="small" @click="polyPts = []; renderOverlay()"><n-icon><Delete /></n-icon><span style="margin-left:3px">清空</span></n-button>
             </template>
-            <el-switch v-if="mode === 'brush' || mode === 'sam'" v-model="fillMode" size="small"
-                       active-text="填充" inactive-text="轮廓" style="margin-left:4px" />
+            <span v-if="mode === 'brush' || mode === 'sam'" style="display:flex;align-items:center;gap:6px;margin-left:4px">
+              <n-switch v-model:value="fillMode" size="small" />
+              <span style="font-size:0.8rem;color:#8a8175">{{ fillMode ? '填充' : '轮廓' }}</span>
+            </span>
             <span style="color:#8a8175;font-size:0.8rem">
               {{ mode === 'box' ? '拖拽画框 · 热键 B · 点击框可选中，Delete 删除' :
                  mode === 'polygon' ? '左键单击加点 · 热键 P · 完成按钮/双击闭合，Esc 取消' :
@@ -1024,7 +1035,7 @@ const imgUrl = ref('')
             </span>
             <span v-if="mode === 'brush' || mode === 'eraser'" style="display:flex;align-items:center;gap:6px">
               <span style="font-size:0.8rem;color:#4a433c">{{ mode === 'eraser' ? '橡皮' : '笔刷' }}</span>
-              <el-input-number v-model="brushSize" :min="1" :max="100" :step="1" size="small" style="width:90px" />
+              <n-input-number v-model:value="brushSize" :min="1" :max="100" :step="1" size="small" style="width:90px" />
             </span>
             <span v-if="editingId" style="color:#e15759;font-size:0.8rem">● 编辑中</span>
             <span v-if="samLoading" style="color:#4a6b4a;font-size:0.8rem">SAM 推理中…</span>
@@ -1032,16 +1043,16 @@ const imgUrl = ref('')
             <span style="font-size:0.8rem;color:#8a8175">
               坐标 {{ gridPos ? `(${gridPos.x}, ${gridPos.y})` : '(--, --)' }}
             </span>
-            <el-button size="small" :title="showGrid ? '隐藏参考网格 (G)' : '显示参考网格 (G)'"
-                       @click="showGrid = !showGrid">{{ showGrid ? '格' : '格' }}</el-button>
+            <n-button size="small" :title="showGrid ? '隐藏参考网格 (G)' : '显示参考网格 (G)'"
+                       @click="showGrid = !showGrid">{{ showGrid ? '格' : '格' }}</n-button>
             <span style="font-size:0.8rem;color:#8a8175">{{ zoomLabel }}</span>
-            <el-button size="small" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></el-button>
-            <el-button size="small" @click="zoomBy(0.8)"><el-icon><ZoomOut /></el-icon></el-button>
-            <el-button size="small" @click="zoomReset"><el-icon><FullScreen /></el-icon><span style="margin-left:3px">适应</span></el-button>
-            <el-button size="small" @click="nextImage(-1)"><el-icon><ArrowLeft /></el-icon><span style="margin-left:3px">上一张</span></el-button>
-            <el-button size="small" type="primary" @click="nextImage(1)">下一张<el-icon style="margin-left:3px"><ArrowRight /></el-icon></el-button>
+            <n-button size="small" @click="zoomBy(1.25)"><n-icon><ZoomIn /></n-icon></n-button>
+            <n-button size="small" @click="zoomBy(0.8)"><n-icon><ZoomOut /></n-icon></n-button>
+            <n-button size="small" @click="zoomReset"><n-icon><FullScreen /></n-icon><span style="margin-left:3px">适应</span></n-button>
+            <n-button size="small" @click="nextImage(-1)"><n-icon><ArrowLeft /></n-icon><span style="margin-left:3px">上一张</span></n-button>
+            <n-button size="small" type="primary" @click="nextImage(1)">下一张<n-icon style="margin-left:3px"><ArrowRight /></n-icon></n-button>
           </div>
-          <div v-loading="loading" style="min-height:400px">
+          <n-spin :show="loading" style="min-height:400px">
             <div v-if="currentImage" ref="canvasScroll" class="canvas-scroll" @wheel.prevent="onWheel">
               <div ref="canvasBox" class="canvas" :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
                    @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp" @click="onCanvasClick"
@@ -1054,13 +1065,13 @@ const imgUrl = ref('')
                 </div>
               </div>
             </div>
-            <el-empty v-else description="选择左侧数据集和图像" :image-size="60" />
-          </div>
+            <n-empty v-else description="选择左侧数据集和图像" size="large" />
+          </n-spin>
         </div>
-      </el-col>
+      </n-gi>
 
       <!-- 右：标注列表（按类别分组） -->
-      <el-col :span="5">
+      <n-gi :span="5">
         <div class="card">
           <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">
             标注列表（{{ anns.filter(a => a.type !== 'class').length }}）
@@ -1070,7 +1081,7 @@ const imgUrl = ref('')
                  @click="selected = classAnn.id">
               <span class="dot" :style="{ background: classAnn.color }"></span>
               <span>整图：{{ classAnn.category_name }}</span>
-              <el-button link size="small" type="danger" @click="removeSelected">×</el-button>
+              <n-button text size="small" type="error" @click="removeSelected">×</n-button>
             </div>
           </div>
           <div v-if="groupedAnns.length" style="max-height:460px;overflow-y:auto">
@@ -1086,18 +1097,16 @@ const imgUrl = ref('')
                 <span style="font-size:0.75rem;color:#8a8175;width:28px;flex-shrink:0">
                   {{ a.type === 'mask' ? '掩码' : '框' }}
                 </span>
-                <el-select :model-value="a.category_id" size="small" style="flex:1;min-width:0"
-                           @change="cid => changeCat(a, cid)">
-                  <el-option v-for="c in categories" :key="c.id" :value="c.id" :label="c.name" />
-                </el-select>
-                <el-button link size="small" type="danger" @click="selected = a.id; removeSelected()">×</el-button>
+                <n-select :value="a.category_id" size="small" style="flex:1;min-width:0"
+                          :options="categoryOptions" @update:value="cid => changeCat(a, cid)" />
+                <n-button text size="small" type="error" @click="selected = a.id; removeSelected()">×</n-button>
               </div>
             </div>
           </div>
-          <el-empty v-else-if="!classAnn" description="无标注" :image-size="50" />
+          <n-empty v-else-if="!classAnn" description="无标注" size="medium" />
         </div>
-      </el-col>
-    </el-row>
+      </n-gi>
+    </n-grid>
   </div>
 </template>
 
@@ -1107,18 +1116,18 @@ const imgUrl = ref('')
   padding: 6px 10px; border: 1px solid #d8cfbe; border-radius: 4px;
   margin-bottom: 6px; cursor: pointer; font-size: 0.85rem;
 }
-.cat-row.on { border-color: #4a6b4a; background: #eef3ee; }
+.cat-row.on { border-color: #4a6b4a; background: var(--bg-hover); }
 .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 .img-row {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 8px; border-radius: 4px; cursor: pointer; margin-bottom: 4px;
 }
-.img-row.on { background: #eef3ee; }
+.img-row.on { background: var(--bg-hover); }
 .badge {
   min-width: 20px; text-align: center; font-size: 0.72rem; padding: 1px 5px;
   border-radius: 8px; background: #e8e6dc; color: #8a8175;
 }
-.badge.done { background: #eef3ee; color: #4a6b4a; }
+.badge.done { background: var(--bg-hover); color: #4a6b4a; }
 .canvas-scroll {
   overflow: auto; max-height: 640px; border: 1px solid #d8cfbe; border-radius: 4px;
   background: #2a2622;
@@ -1143,5 +1152,5 @@ const imgUrl = ref('')
   padding: 5px 8px; border: 1px solid #d8cfbe; border-radius: 4px;
   margin-bottom: 4px; cursor: pointer;
 }
-.ann-row.on { border-color: #4a6b4a; background: #eef3ee; }
+.ann-row.on { border-color: #4a6b4a; background: var(--bg-hover); }
 </style>

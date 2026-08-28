@@ -1,7 +1,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  NButton, NCheckbox, NEmpty, NForm, NFormItem, NGrid, NGi, NInput,
+  NInputNumber, NSelect, NSlider, NSpin,
+  useMessage, useDialog,
+} from 'naive-ui'
 import { api } from '../api'
 import { friendlyName } from '../utils/format'
 import CurveChart from '../components/CurveChart.vue'
@@ -10,6 +14,8 @@ import TaskItem from '../components/TaskItem.vue'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
+const message = useMessage()
+const dialog = useDialog()
 
 // ---- 表单 ----
 const datasets = ref([])
@@ -63,11 +69,11 @@ watch(ratioLock, async (on) => {
 })
 
 async function previewView() {
-  if (!datasets.value.length) return ElMessage.warning('请先导入数据集')
+  if (!datasets.value.length) return message.warning('请先导入数据集')
   viewLoading.value = true
   try {
     const im = await getFirstImage()
-    if (!im) return ElMessage.warning('数据集无图像')
+    if (!im) return message.warning('数据集无图像')
     const r = await api.preview.resize({
       image_id: im.id, width: form.value.imgsz_w, height: form.value.imgsz_h,
     })
@@ -87,6 +93,14 @@ const taskTypes = [
 ]
 const enginesOf = computed(() => engines.value.filter(e => e.task_type === form.value.task_type))
 const engineOptionsWithCustom = computed(() => [...enginesOf.value.map(e => e.id), 'custom'])
+const engineOptions = computed(() => engineOptionsWithCustom.value.map(e => ({
+  value: e,
+  label: e === 'custom' ? '自定义规模' : (engines.value.find(x => x.id === e)?.label || e),
+})))
+const datasetOptions = computed(() => datasets.value.map(d => ({ value: d.id, label: `${d.name}（${d.image_count} 张）` })))
+const preprocessOptions = computed(() => pipelines.value.map(p => ({ value: p.id, label: p.name })))
+const augPipeSegmentOptions = computed(() => augPipelines.value.filter(x => !isUltra(x)).map(p => ({ value: p.id, label: p.name })))
+const augPipeUltraOptions = computed(() => augPipelines.value.filter(isUltra).map(p => ({ value: p.id, label: p.name })))
 
 const augName = ref('')
 
@@ -99,7 +113,7 @@ function isUltra(p) {
 }
 
 async function saveUltraAug() {
-  if (!augName.value.trim()) return ElMessage.warning('请输入增强配置名称')
+  if (!augName.value.trim()) return message.warning('请输入增强配置名称')
   await api.pipelines.create({
     project_id: pid, name: augName.value,
     ops: [{ name: '__ultra__', params: {
@@ -107,7 +121,7 @@ async function saveUltraAug() {
       mixup: form.value.aug_mixup, hsv: form.value.aug_hsv } }],
     type: 'aug',
   })
-  ElMessage.success('增强配置已保存')
+  message.success('增强配置已保存')
   augName.value = ''
   augPipelines.value = await api.pipelines.list(pid, 'aug')
 }
@@ -118,7 +132,7 @@ async function applySafeAug() {
   form.value.aug_mosaic = d.mosaic
   form.value.aug_mixup = d.mixup
   form.value.aug_hsv = d.hsv
-  ElMessage.success('已应用工业安全增强：保守光照/几何参数，仅模拟产线物理变化')
+  message.success('已应用工业安全增强：保守光照/几何参数，仅模拟产线物理变化')
 }
 
 async function onAugPipelineChange(id) {
@@ -225,8 +239,8 @@ async function loadResult() {
 }
 
 async function submit() {
-  if (!form.value.name.trim()) return ElMessage.warning('请输入模型名称')
-  if (!form.value.dataset_ids?.length) return ElMessage.warning('请选择至少一个数据集')
+  if (!form.value.name.trim()) return message.warning('请输入模型名称')
+  if (!form.value.dataset_ids?.length) return message.warning('请选择至少一个数据集')
   submitting.value = true
   try {
     const { imgsz_w, imgsz_h, ...rest } = form.value
@@ -235,7 +249,7 @@ async function submit() {
       imgsz: [imgsz_w, imgsz_h],
       engine: form.value.engine === 'custom' ? 'yolo11s' : form.value.engine,
     })
-    ElMessage.success('训练任务已提交')
+    message.success('训练任务已提交')
     form.value.name = ''
     await loadTasks()
     const t = tasks.value.find(x => x.id === r.task_id)
@@ -245,38 +259,41 @@ async function submit() {
 
 async function stopTask(task) {
   await api.train.stop(task.id)
-  ElMessage.info('停止信号已发送')
+  message.info('停止信号已发送')
   loadTasks()
 }
 
-async function resubmitTask(task) {
+function resubmitTask(task) {
   /** 重新提交：用原任务 config 填表单并提交。 */
   const cfg = task.config
-  if (!cfg) return ElMessage.warning('任务配置缺失，无法重新提交')
-  await ElMessageBox.confirm(
-    `用任务 #${task.id}（${task.model_name}）的配置重新提交一次训练？`,
-    '重新提交', { type: 'info' },
-  ).catch(() => { throw 'cancel' })
-  form.value = {
-    name: task.model_name + ' (重试)',
-    task_type: task.task_type,
-    engine: task.engine === 'custom' ? 'custom' : task.engine,
-    dataset_ids: cfg.dataset_ids || (cfg.dataset_id ? [cfg.dataset_id] : []),
-    epochs: cfg.epochs ?? 100,
-    imgsz_w: Array.isArray(cfg.imgsz) ? cfg.imgsz[0] : (cfg.imgsz ?? 640),
-    imgsz_h: Array.isArray(cfg.imgsz) ? cfg.imgsz[1] : (cfg.imgsz ?? 640),
-    batch: cfg.batch ?? 16,
-    custom_arch: cfg.custom_arch || '',
-    preprocess_pipeline_id: cfg.preprocess_pipeline_id ?? null,
-    aug_pipeline_id: cfg.aug_pipeline_id ?? null,
-    aug_flip: cfg.aug_flip ?? true,
-    aug_mosaic: cfg.aug_mosaic ?? 1.0,
-    aug_mixup: cfg.aug_mixup ?? 0.0,
-    aug_hsv: cfg.aug_hsv ?? 0.015,
-  }
-  // 滚动到顶部表单
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-  ElMessage.info('已填入原任务配置，检查后点击提交训练')
+  if (!cfg) return message.warning('任务配置缺失，无法重新提交')
+  dialog.warning({
+    title: '重新提交',
+    content: `用任务 #${task.id}（${task.model_name}）的配置重新提交一次训练？`,
+    positiveText: '确定', negativeText: '取消',
+    onPositiveClick: () => {
+      form.value = {
+        name: task.model_name + ' (重试)',
+        task_type: task.task_type,
+        engine: task.engine === 'custom' ? 'custom' : task.engine,
+        dataset_ids: cfg.dataset_ids || (cfg.dataset_id ? [cfg.dataset_id] : []),
+        epochs: cfg.epochs ?? 100,
+        imgsz_w: Array.isArray(cfg.imgsz) ? cfg.imgsz[0] : (cfg.imgsz ?? 640),
+        imgsz_h: Array.isArray(cfg.imgsz) ? cfg.imgsz[1] : (cfg.imgsz ?? 640),
+        batch: cfg.batch ?? 16,
+        custom_arch: cfg.custom_arch || '',
+        preprocess_pipeline_id: cfg.preprocess_pipeline_id ?? null,
+        aug_pipeline_id: cfg.aug_pipeline_id ?? null,
+        aug_flip: cfg.aug_flip ?? true,
+        aug_mosaic: cfg.aug_mosaic ?? 1.0,
+        aug_mixup: cfg.aug_mixup ?? 0.0,
+        aug_hsv: cfg.aug_hsv ?? 0.015,
+      }
+      // 滚动到顶部表单
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      message.info('已填入原任务配置，检查后点击提交训练')
+    },
+  })
 }
 
 onMounted(async () => {
@@ -320,115 +337,102 @@ onUnmounted(stopPolling)
     <div class="page-head">
       <h2>训练中心</h2>
       <div>
-        <el-button @click="$router.push(`/projects/${pid}/charts`)">曲线图表</el-button>
-        <el-button @click="$router.push(`/projects/${pid}/results`)">训练效果</el-button>
+        <n-button @click="$router.push(`/projects/${pid}/charts`)">曲线图表</n-button>
+        <n-button @click="$router.push(`/projects/${pid}/results`)">训练效果</n-button>
       </div>
     </div>
 
-    <el-row :gutter="16">
+    <n-grid :cols="24" :x-gap="16">
       <!-- 左：表单 + 任务列表 -->
-      <el-col :span="10">
+      <n-gi :span="10">
         <div class="card" style="margin-bottom:12px">
           <div style="font-weight:600;margin-bottom:12px;font-size:0.95rem">新建训练任务</div>
-                              <el-form label-width="90px" label-position="left">
-            <el-form-item label="模型名称">
-              <el-input v-model="form.name" placeholder="如：焊点检测 v1" />
-            </el-form-item>
-            <el-form-item label="任务类型">
-              <el-select v-model="form.task_type" style="width:100%">
-                <el-option v-for="t in taskTypes" :key="t.value" :value="t.value" :label="t.label" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="模型档位">
-              <el-select v-model="form.engine" style="width:100%" @change="applyEngineDefaults">
-                <el-option v-for="e in engineOptionsWithCustom" :key="e" :value="e"
-                           :label="e === 'custom' ? '自定义规模' : (engines.find(x => x.id === e)?.label || e)" />
-              </el-select>
-            </el-form-item>
-            <el-form-item v-if="form.engine === 'custom'" label="架构定义">
-              <el-input v-model="form.custom_arch" placeholder="如：yolo11n-custom.yaml 或 scale=0.75" />
-            </el-form-item>
-            <el-form-item label="数据集">
-              <el-select v-model="form.dataset_ids" multiple style="width:100%" placeholder="可多选，混合训练">
-                <el-option v-for="d in datasets" :key="d.id" :value="d.id" :label="`${d.name}（${d.image_count} 张）`" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="预处理管线">
-              <el-select v-model="form.preprocess_pipeline_id" clearable style="width:100%" placeholder="可选的预处理管线">
-                <el-option v-for="p in pipelines" :key="p.id" :value="p.id" :label="p.name" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="增强管线">
-              <el-select v-if="form.task_type === 'segment'" v-model="form.aug_pipeline_id" clearable style="width:100%" placeholder="自定义增强管线（分割训练应用）">
-                <el-option v-for="p in augPipelines.filter(x => !isUltra(x))" :key="p.id" :value="p.id" :label="p.name" />
-              </el-select>
-              <el-select v-else v-model="form.aug_pipeline_id" clearable style="width:100%" placeholder="加载已保存的内置增强配置" @change="onAugPipelineChange">
-                <el-option v-for="p in augPipelines.filter(isUltra)" :key="p.id" :value="p.id" :label="p.name" />
-              </el-select>
-            </el-form-item>
-            <el-form-item v-if="form.task_type === 'detect' || form.task_type === 'classify'" label="内置增强">
+          <n-form label-placement="left" label-width="90">
+            <n-form-item label="模型名称">
+              <n-input v-model:value="form.name" placeholder="如：焊点检测 v1" />
+            </n-form-item>
+            <n-form-item label="任务类型">
+              <n-select v-model:value="form.task_type" :options="taskTypes" style="width:100%" />
+            </n-form-item>
+            <n-form-item label="模型档位">
+              <n-select v-model:value="form.engine" :options="engineOptions" style="width:100%" @update:value="applyEngineDefaults" />
+            </n-form-item>
+            <n-form-item v-if="form.engine === 'custom'" label="架构定义">
+              <n-input v-model:value="form.custom_arch" placeholder="如：yolo11n-custom.yaml 或 scale=0.75" />
+            </n-form-item>
+            <n-form-item label="数据集">
+              <n-select v-model:value="form.dataset_ids" multiple :options="datasetOptions" style="width:100%" placeholder="可多选，混合训练" />
+            </n-form-item>
+            <n-form-item label="预处理管线">
+              <n-select v-model:value="form.preprocess_pipeline_id" clearable :options="preprocessOptions" style="width:100%" placeholder="可选的预处理管线" />
+            </n-form-item>
+            <n-form-item label="增强管线">
+              <n-select v-if="form.task_type === 'segment'" v-model:value="form.aug_pipeline_id" clearable :options="augPipeSegmentOptions" style="width:100%" placeholder="自定义增强管线（分割训练应用）" />
+              <n-select v-else v-model:value="form.aug_pipeline_id" clearable :options="augPipeUltraOptions" style="width:100%" placeholder="加载已保存的内置增强配置" @update:value="onAugPipelineChange" />
+            </n-form-item>
+            <n-form-item v-if="form.task_type === 'detect' || form.task_type === 'classify'" label="内置增强">
               <div style="width:100%">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-bottom:6px">
-                  <el-checkbox v-model="form.aug_flip">水平翻转</el-checkbox>
+                  <n-checkbox v-model:checked="form.aug_flip">水平翻转</n-checkbox>
                   <div class="aug-row">
                     <span>Mosaic</span>
-                    <el-slider v-model="form.aug_mosaic" :min="0" :max="1" :step="0.1" size="small" style="flex:1" />
+                    <n-slider v-model:value="form.aug_mosaic" :min="0" :max="1" :step="0.1" style="flex:1" />
                     <b>{{ form.aug_mosaic }}</b>
                   </div>
                   <div class="aug-row">
                     <span>MixUp</span>
-                    <el-slider v-model="form.aug_mixup" :min="0" :max="1" :step="0.05" size="small" style="flex:1" />
+                    <n-slider v-model:value="form.aug_mixup" :min="0" :max="1" :step="0.05" style="flex:1" />
                     <b>{{ form.aug_mixup }}</b>
                   </div>
                   <div class="aug-row">
                     <span>HSV 扰动</span>
-                    <el-slider v-model="form.aug_hsv" :min="0" :max="0.1" :step="0.005" size="small" style="flex:1" />
+                    <n-slider v-model:value="form.aug_hsv" :min="0" :max="0.1" :step="0.005" style="flex:1" />
                     <b>{{ form.aug_hsv }}</b>
                   </div>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
-                  <el-input v-model="augName" placeholder="增强配置名称，保存为管线" size="small" style="max-width:220px" />
-                  <el-button size="small" @click="saveUltraAug">保存增强</el-button>
-                  <el-button size="small" type="primary" plain @click="applySafeAug">一键工业安全增强</el-button>
+                  <n-input v-model:value="augName" placeholder="增强配置名称，保存为管线" size="small" style="max-width:220px" />
+                  <n-button size="small" @click="saveUltraAug">保存增强</n-button>
+                  <n-button size="small" type="primary" secondary @click="applySafeAug">一键工业安全增强</n-button>
                   <span style="color:#8a8175;font-size:0.78rem">内置增强在训练时在线生效（Mosaic 等），配置可保存复用</span>
                 </div>
               </div>
-            </el-form-item>
-            <el-row :gutter="8">
-              <el-col :span="12">
-                <el-form-item label="Epochs" label-width="60px">
-                  <el-input-number v-model="form.epochs" :min="1" :max="2000" style="width:100%" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Batch" label-width="52px">
-                  <el-input-number v-model="form.batch" :min="1" :max="256" style="width:100%" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="8" style="margin-bottom:4px">
-              <el-col :span="8">
-                <el-form-item label="输入宽" label-width="60px">
-                  <el-input-number v-model="form.imgsz_w" :min="64" :max="8192" :step="32" style="width:100%" :disabled="ratioLock" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="输入高" label-width="60px">
-                  <el-input-number v-model="form.imgsz_h" :min="64" :max="8192" :step="32" style="width:100%" :disabled="ratioLock" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="按比例">
+            </n-form-item>
+            <n-grid :cols="24" :x-gap="8">
+              <n-gi :span="12">
+                <n-form-item label="Epochs" label-width="60">
+                  <n-input-number v-model:value="form.epochs" :min="1" :max="2000" style="width:100%" />
+                </n-form-item>
+              </n-gi>
+              <n-gi :span="12">
+                <n-form-item label="Batch" label-width="52">
+                  <n-input-number v-model:value="form.batch" :min="1" :max="256" style="width:100%" />
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+            <n-grid :cols="24" :x-gap="8" style="margin-bottom:4px">
+              <n-gi :span="8">
+                <n-form-item label="输入宽" label-width="60">
+                  <n-input-number v-model:value="form.imgsz_w" :min="64" :max="8192" :step="32" style="width:100%" :disabled="ratioLock" />
+                </n-form-item>
+              </n-gi>
+              <n-gi :span="8">
+                <n-form-item label="输入高" label-width="60">
+                  <n-input-number v-model:value="form.imgsz_h" :min="64" :max="8192" :step="32" style="width:100%" :disabled="ratioLock" />
+                </n-form-item>
+              </n-gi>
+              <n-gi :span="8">
+                <n-form-item label="按比例">
                   <div style="display:flex;align-items:center;gap:8px;width:100%">
-                    <el-checkbox v-model="ratioLock" />
-                    <el-slider v-if="ratioLock" v-model="ratioVal" :min="10" :max="100" :step="5" size="small" style="flex:1" />
+                    <n-checkbox v-model:checked="ratioLock" />
+                    <n-slider v-if="ratioLock" v-model:value="ratioVal" :min="10" :max="100" :step="5" style="flex:1" />
                     <span v-if="ratioLock" style="font-size:0.8rem;color:#4a6b4a;width:38px;text-align:right">{{ ratioVal }}%</span>
                   </div>
-                </el-form-item>
-              </el-col>
-            </el-row>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-              <el-button size="small" :loading="viewLoading" @click="previewView">模型视角预览</el-button>
+              <n-button size="small" :loading="viewLoading" @click="previewView">模型视角预览</n-button>
               <span style="color:#8a8175;font-size:0.78rem">等比缩放 + 灰边填充到输入尺寸，建议宽高比与相机图像一致</span>
             </div>
             <img v-if="viewImg" :src="viewImg" style="max-width:100%;border:1px solid #d8cfbe;border-radius:4px" />
@@ -444,10 +448,10 @@ onUnmounted(stopPolling)
               </template>
               <div v-else style="color:#8a8175">该图无缺陷标注（或标注类型非框/掩码）</div>
             </div>
-          </el-form>
-          <el-button type="primary" style="width:100%" :loading="submitting" @click="submit">
+          </n-form>
+          <n-button type="primary" style="width:100%" :loading="submitting" @click="submit">
             提交训练
-          </el-button>
+          </n-button>
           <div style="color:#8a8175;font-size:0.8rem;margin-top:8px">
             单 GPU 串行执行，一次只跑一个任务。支持检测 / 分割 / 分类 / 异常检测 / 聚类全部任务。
           </div>
@@ -455,16 +459,18 @@ onUnmounted(stopPolling)
 
         <div class="card">
           <div style="font-weight:600;margin-bottom:10px;font-size:0.95rem">任务列表</div>
-          <div v-loading="loadingTasks" style="max-height:360px;overflow-y:auto">
-            <TaskItem v-for="t in tasks" :key="t.id" :task="t" :active="current?.id === t.id"
-                      @select="selectTask" @stop="stopTask" @resubmit="resubmitTask" />
-            <el-empty v-if="!tasks.length" description="暂无训练任务" :image-size="60" />
-          </div>
+          <n-spin :show="loadingTasks">
+            <div style="max-height:360px;overflow-y:auto">
+              <TaskItem v-for="t in tasks" :key="t.id" :task="t" :active="current?.id === t.id"
+                        @select="selectTask" @stop="stopTask" @resubmit="resubmitTask" />
+              <n-empty v-if="!tasks.length" description="暂无训练任务" :image-size="60" />
+            </div>
+          </n-spin>
         </div>
-      </el-col>
+      </n-gi>
 
       <!-- 右：详情 -->
-      <el-col :span="14">
+      <n-gi :span="14">
         <template v-if="current">
           <div class="card" style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -473,12 +479,12 @@ onUnmounted(stopPolling)
                 <span style="color:#8a8175;font-weight:400;font-size:0.8rem">#{{ current.id }}</span>
               </span>
               <div>
-                <el-button v-if="['queued', 'running'].includes(current.status)" size="small" type="danger" plain
-                           @click="stopTask(current)">停止</el-button>
+                <n-button v-if="['queued', 'running'].includes(current.status)" size="small" type="error" secondary
+                           @click="stopTask(current)">停止</n-button>
               </div>
             </div>
             <CurveChart v-if="curve.exists" :columns="curve.columns" :rows="curve.rows" />
-            <el-empty v-else description="训练开始后显示实时曲线" :image-size="60" />
+            <n-empty v-else description="训练开始后显示实时曲线" :image-size="60" />
           </div>
 
           <div class="card" style="margin-bottom:12px">
@@ -494,9 +500,9 @@ onUnmounted(stopPolling)
             <ResultCard :result="result" />
           </div>
         </template>
-        <el-empty v-else description="选择左侧任务查看详情" :image-size="80" style="margin-top:80px" />
-      </el-col>
-    </el-row>
+        <n-empty v-else description="选择左侧任务查看详情" :image-size="80" style="margin-top:80px" />
+      </n-gi>
+    </n-grid>
   </div>
 </template>
 
@@ -515,6 +521,6 @@ onUnmounted(stopPolling)
   margin: 0;
 }
 .aug-row { display: flex; align-items: center; gap: 8px; }
-.aug-row span { font-size: 0.8rem; color: #4a433c; white-space: nowrap; width: 62px; }
+.aug-row span { font-size: 0.8rem; color: var(--el-text-color-primary); white-space: nowrap; width: 62px; }
 .aug-row b { font-size: 0.8rem; color: #4a6b4a; font-variant-numeric: tabular-nums; width: 34px; text-align: right; }
 </style>

@@ -1,4 +1,6 @@
 <script setup>
+import { NButton, NProgress } from 'naive-ui'
+
 defineProps({
   task: { type: Object, required: true },
   active: { type: Boolean, default: false },
@@ -23,13 +25,13 @@ const statusMeta = {
     <div style="font-size:0.78rem;color:#8a8175;margin:2px 0 6px">
       #{{ task.id }} · {{ task.engine }} · {{ task.created_at }}
     </div>
-    <el-progress :percentage="Math.round(task.progress * 100)" :stroke-width="6"
-                 :status="task.status === 'failed' ? 'exception' : undefined" />
+    <n-progress type="line" :percentage="Math.round(task.progress * 100)" :stroke-width="6"
+                :status="task.status === 'failed' ? 'error' : 'default'" />
     <div style="display:flex;gap:6px;margin-top:6px">
-      <el-button v-if="['queued', 'running'].includes(task.status)" size="small" type="danger" plain
-                 @click.stop="$emit('stop', task)">停止</el-button>
-      <el-button v-if="['failed', 'stopped', 'success'].includes(task.status)" size="small" plain
-                 @click.stop="$emit('resubmit', task)">重新提交</el-button>
+      <n-button v-if="['queued', 'running'].includes(task.status)" size="small" type="error" secondary
+                 @click.stop="$emit('stop', task)">停止</n-button>
+      <n-button v-if="['failed', 'stopped', 'success'].includes(task.status)" size="small" secondary
+                 @click.stop="$emit('resubmit', task)">重新提交</n-button>
     </div>
   </div>
 </template>
