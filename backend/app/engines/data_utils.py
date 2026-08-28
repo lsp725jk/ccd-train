@@ -11,8 +11,11 @@ NORMAL_NAME = "正常"
 
 
 def defect_categories(cats: list) -> list:
-    """排除常驻「正常」类别，返回缺陷类表（检测/分割训练的类列表）。"""
-    return [c for c in cats if c.get("name") != NORMAL_NAME]
+    """排除常驻「正常」类别，返回缺陷类表（检测/分割训练的类列表）。
+
+    cats 可能是 sqlite3.Row 或 dict，统一按下标键访问。
+    """
+    return [c for c in cats if c["name"] != NORMAL_NAME]
 
 
 def load_ds(conn: sqlite3.Connection, dataset_id: int):

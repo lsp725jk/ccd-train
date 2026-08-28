@@ -72,32 +72,14 @@ def export_model(model_id: int):
     elif model["task_type"] == "segment":
         import torch
         import segmentation_models_pytorch as smp
-        # 类别数必须与训练一致：训练按数据集级类别（config.json 的 dataset_ids），
-        # 不能用项目级计数（跨数据集项目会因维度不匹配导出失败）
-        with get_conn() as conn:
-            cfg_path = run_dir / "config.json"
-            dsids = []
-            if cfg_path.is_file():
-                try:
-                    import json as _json
-                    from app.engines.data_utils import cfg_dataset_ids
-                    dsids = cfg_dataset_ids(_json.loads(cfg_path.read_text(encoding="utf-8")))
-                except Exception:
-                    dsids = []
-            if dsids:
-                ph = ",".join("?" * len(dsids))
-                n_classes = conn.execute(
-                    f"SELECT COUNT(*) FROM categories WHERE dataset_id IN ({ph})", tuple(dsids)
-                ).fetchone()[0]
-            else:
-                n_classes = conn.execute(
-                    "SELECT COUNT(*) FROM categories WHERE project_id=?", (model["project_id"],)
-                ).fetchone()[0]
         encoder = model["engine"].split("_")[-1] if model["engine"].startswith("unet") else "resnet50"
         arch = "DeepLabV3Plus" if model["engine"].startswith("deeplab") else "Unet"
+        # 以 checkpoint 实际输出通道数为准（可能与当前类别数不同，如训练时含「正常」）
+        sd = torch.load(weight, map_location="cpu")
+        total_cls = int(sd["segmentation_head.0.weight"].shape[0])
         m = smp.create_model(arch, encoder_name=encoder, encoder_weights=None,
-                             classes=n_classes + 1, in_channels=3)
-        m.load_state_dict(torch.load(weight, map_location="cpu"))
+                             classes=total_cls, in_channels=3)
+        m.load_state_dict(sd)
         m.eval()
         onnx_path = run_dir / "weights" / "best.onnx"
         if isinstance(imgsz, (list, tuple)):
@@ -200,38 +182,23 @@ def _task_dir_of(model) -> Path:
     return run_dir
 
 
-def _cfg_dataset_ids(cfg_path: Path) -> list:
-    import json as _json
-    try:
-        from app.engines.data_utils import cfg_dataset_ids
-        cfg = _json.loads(cfg_path.read_text(encoding="utf-8"))
-        return cfg_dataset_ids(cfg)
-    except Exception:
-        return []
-
-
 def _predict_segment_torch(model, img_path: Path, out_path: Path, imgsz: int | list[int], cats, run_dir: Path):
-    """segment（未导出 ONNX）：torch 权重直接推理预览（类别数与训练一致：数据集级）。"""
+    """segment（未导出 ONNX）：torch 权重直接推理预览。
+
+    类数以 checkpoint 实际输出通道为准（可能与当前类别计数不同），
+    对含/不含「正常」的历史模型均兼容。
+    """
     import torch
     import segmentation_models_pytorch as smp
 
-    with get_conn() as conn:
-        dsids = _cfg_dataset_ids(run_dir / "config.json")
-        if dsids:
-            ph = ",".join("?" * len(dsids))
-            n_classes = conn.execute(
-                f"SELECT COUNT(*) FROM categories WHERE dataset_id IN ({ph})", tuple(dsids)
-            ).fetchone()[0]
-        else:
-            n_classes = conn.execute(
-                "SELECT COUNT(*) FROM categories WHERE project_id=?", (model["project_id"],)
-            ).fetchone()[0]
     weight = _weight_path(model, run_dir)
+    sd = torch.load(weight, map_location="cpu")
+    total_cls = int(sd["segmentation_head.0.weight"].shape[0])
     encoder = model["engine"].split("_")[-1] if model["engine"].startswith("unet") else "resnet50"
     arch = "DeepLabV3Plus" if model["engine"].startswith("deeplab") else "Unet"
     m = smp.create_model(arch, encoder_name=encoder, encoder_weights=None,
-                         classes=n_classes + 1, in_channels=3)
-    m.load_state_dict(torch.load(weight, map_location="cpu"))
+                         classes=total_cls, in_channels=3)
+    m.load_state_dict(sd)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m.to(device).eval()
 

@@ -50,6 +50,8 @@ const pipelineOptions = computed(() => pipelines.value.map(p => ({ label: p.name
 
 // ---- ONNX 导出 / 推理预览 ----
 const exporting = ref(null)
+const exportResult = ref(null)   // {name, onnx_path, size_mb}
+const exportShow = ref(false)
 const previewDlg = ref(false)
 const previewModel = ref(null)
 const previewImage = ref(null)
@@ -64,12 +66,23 @@ async function doExport(row) {
   exporting.value = row.id
   try {
     const r = await api.models.exportModel(row.id)
-    message.success(`已导出 ONNX（${r.size_mb} MB）`)
     row.onnx_path = r.onnx_path
+    exportResult.value = { name: row.name, ...r }
+    exportShow.value = true
   } catch (e) {
     message.error(String(e.response?.data?.detail || e.message).slice(0, 200))
   } finally {
     exporting.value = null
+  }
+}
+
+async function copyPath() {
+  if (!exportResult.value?.onnx_path) return
+  try {
+    await navigator.clipboard.writeText(exportResult.value.onnx_path)
+    message.success('路径已复制')
+  } catch {
+    message.warning('复制失败，请手动选择复制')
   }
 }
 
@@ -231,8 +244,7 @@ const columns = computed(() => {
     <n-data-table :data="list" :columns="columns" :loading="loading" class="card" />
 
     <n-modal v-model:show="previewDlg" preset="card"
-             :title="previewModel ? `${previewModel.name} 推理预览` : '推理预览'" style="width:760px">
-      <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+             :title="previewModel ? `${previewModel.name} 推理预览` : '推理预览'" style="width:760px">      <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
         <span style="font-size:0.85rem;color:var(--text-muted)">数据集</span>
         <n-select v-model:value="previewDsId" :options="previewDatasets.map(d => ({ label: `${d.name}（${d.image_count} 张）`, value: d.id }))"
                   style="width:220px" @update:value="loadPreviewImages" />
@@ -255,6 +267,21 @@ const columns = computed(() => {
       <template #footer>
         <n-button @click="previewDlg = false">关闭</n-button>
       </template>
+    </n-modal>
+
+    <!-- 导出结果：路径可选择/复制 -->
+    <n-modal v-model:show="exportShow" preset="card" title="导出完成" style="width:640px">
+      <div v-if="exportResult" style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:0.9rem">
+          「{{ exportResult.name }}」已导出为 ONNX
+          <span style="color:var(--text-muted);font-size:0.85rem">（{{ exportResult.size_mb }} MB）</span>
+        </div>
+        <n-input v-model:value="exportResult.onnx_path" readonly type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <n-button @click="exportShow = false">关闭</n-button>
+          <n-button type="primary" @click="copyPath">复制路径</n-button>
+        </div>
+      </div>
     </n-modal>
 
     <n-modal v-model:show="dlg" preset="card" title="导入外部模型" style="width:560px">

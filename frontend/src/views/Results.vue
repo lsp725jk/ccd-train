@@ -31,6 +31,7 @@ const METRIC_LABELS = {
 }
 
 // 预测明细展开（用图像下标选中，NSelect 的 value 需为 string/number）
+// 预测明细展开（用图像下标选中，NSelect 的 value 需为 string/number）
 const expandIndex = ref(null)
 const selectOptions = computed(() => (result.value?.predictions || []).map((p, i) => ({
   label: `${p.image}（${(p.boxes || p.regions || []).length} 个目标）`,
@@ -157,15 +158,23 @@ const modelColumns = computed(() => {
   ]
 })
 
-const predictionColumns = [
-  { title: '#', key: 'idx', width: 50 },
-  { title: '类型', key: 'category', width: 110 },
-  { title: '置信度/得分', key: 'score', width: 110 },
-  { title: '位置 (x1,y1)→(x2,y2)', key: 'bbox', minWidth: 220 },
-  { title: '中心点', key: 'center', width: 130 },
-  { title: '面积(px)', key: 'area_px', width: 90 },
-  { title: '面积占比', key: 'area_ratio', width: 90 },
-]
+const predictionColumns = computed(() => {
+  const cols = [
+    { title: '#', key: 'idx', width: 50 },
+    { title: '类型', key: 'category', width: 110 },
+  ]
+  // 分割/异常检测无单目标置信度，不显示分数列（尾部「面积占比」已表达）
+  if (!(selected.value && ['segment', 'us_segment'].includes(selected.value.task_type))) {
+    cols.push({ title: '置信度', key: 'score', width: 100 })
+  }
+  cols.push(
+    { title: '位置 (x1,y1)→(x2,y2)', key: 'bbox', minWidth: 220 },
+    { title: '中心点', key: 'center', width: 130 },
+    { title: '面积(px)', key: 'area_px', width: 90 },
+    { title: '面积占比', key: 'area_ratio', width: 90 },
+  )
+  return cols
+})
 </script>
 
 <template>

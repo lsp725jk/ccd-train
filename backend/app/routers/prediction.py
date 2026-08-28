@@ -132,12 +132,15 @@ def _predict_segment(model, run_dir, cfg):
     from app.engines.data_utils import defect_categories as _dc
     cats = _dc(cats)
     ds_map, test_imgs = _test_images(cfg)
-    n_classes = len(cats)
     encoder = cfg["engine"].split("_")[-1] if cfg["engine"].startswith("unet") else "resnet50"
     arch = "DeepLabV3Plus" if cfg["engine"].startswith("deeplab") else "Unet"
+    # 以 checkpoint 实际输出通道数为准（可能含/不含「正常」，不依赖类别计数）
+    weight = _load_weight(run_dir)
+    sd = torch.load(weight, map_location="cpu")
+    total_cls = int(sd["segmentation_head.0.weight"].shape[0])
     m = smp.create_model(arch, encoder_name=encoder, encoder_weights=None,
-                         classes=n_classes + 1, in_channels=3)
-    m.load_state_dict(torch.load(_load_weight(run_dir), map_location="cpu"))
+                         classes=total_cls, in_channels=3)
+    m.load_state_dict(sd)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m.to(device).eval()
     cat_names = {i + 1: c["name"] for i, c in enumerate(cats)}
