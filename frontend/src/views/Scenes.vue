@@ -66,9 +66,11 @@ function onTreeSelect(keys) {
   const k = keys && keys[0]
   if (!k) return
   if (k.startsWith('item-')) {
+    // key 形如 item-{sceneId}-{itemId}；内置场景 id 为字符串（metal/steel_sheet），
+    // 不可 Number() 强转，按字符串比较
     const [, sceneId, itemId] = k.split('-')
-    const scene = scenes.value.find(s => s.id === Number(sceneId))
-    const item = scene?.items?.find(it => it.id === Number(itemId))
+    const scene = scenes.value.find(s => String(s.id) === sceneId)
+    const item = scene?.items?.find(it => String(it.id) === itemId)
     if (scene && item) selectItem(scene, item)
   } else if (k.startsWith('custom-')) {
     const name = k.slice('custom-'.length)
