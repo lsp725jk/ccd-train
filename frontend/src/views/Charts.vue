@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
+import { NSelect, NEmpty } from 'naive-ui'
 import { api } from '../api'
 import { isDark, onThemeChange } from '../utils/theme'
 
@@ -29,6 +30,9 @@ const availableMetrics = computed(() => {
   }
   return [...cols]
 })
+
+const taskOptions = computed(() => tasks.value.map(t => ({ label: `${t.model_name} (#${t.id})`, value: t.id })))
+const metricOptions = computed(() => availableMetrics.value.map(m => ({ label: METRIC_LABELS[m] || m, value: m })))
 
 watch(metric, (m) => {
   if (m && !availableMetrics.value.includes(m)) metric.value = availableMetrics.value[0] || 'mAP50'
@@ -127,22 +131,17 @@ watch(metric, render)
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <span style="font-size:0.85rem;color:#4a433c">任务</span>
-        <el-select v-model="selectedIds" multiple collapse-tags style="width:360px" placeholder="选择要对比的训练任务">
-          <el-option v-for="t in tasks" :key="t.id" :value="t.id"
-                     :label="`${t.model_name} (#${t.id})`" />
-        </el-select>
+        <n-select v-model:value="selectedIds" multiple :max-tag-count="1" :options="taskOptions"
+                  style="width:360px" placeholder="选择要对比的训练任务" />
         <span style="font-size:0.85rem;color:#4a433c">指标</span>
-        <el-select v-model="metric" style="width:150px">
-          <el-option v-for="m in availableMetrics" :key="m" :value="m"
-                     :label="METRIC_LABELS[m] || m" />
-        </el-select>
+        <n-select v-model:value="metric" :options="metricOptions" style="width:150px" />
         <span style="color:#8a8175;font-size:0.8rem">多选任务可同图对比，横轴为 epoch</span>
       </div>
     </div>
 
     <div class="card">
       <div ref="chartEl" style="width:100%;height:480px"></div>
-      <el-empty v-if="!selectedIds.length" description="选择任务开始对比" :image-size="60" style="margin-top:-480px;pointer-events:none" />
+      <n-empty v-if="!selectedIds.length" description="选择任务开始对比" :image-size="60" style="margin-top:-480px;pointer-events:none" />
     </div>
   </div>
 </template>

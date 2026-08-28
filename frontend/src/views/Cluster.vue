@@ -1,11 +1,12 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { NSelect, NInputNumber, NButton, NSwitch, NEmpty, NImage, useMessage } from 'naive-ui'
 import { api } from '../api'
 
 const route = useRoute()
 const pid = Number(route.params.pid)
+const message = useMessage()
 
 const datasets = ref([])
 const categories = ref([])
@@ -15,6 +16,9 @@ const running = ref(false)
 const result = ref(null)
 const meta = ref({})        // cluster_id -> { category_id, ignored }
 const applying = ref(false)
+
+const datasetOptions = computed(() => datasets.value.map(d => ({ label: `${d.name}（${d.image_count} 张）`, value: d.id })))
+const categoryOptions = computed(() => categories.value.map(cat => ({ label: cat.name, value: cat.id })))
 
 async function loadBase() {
   datasets.value = await api.datasets.list(pid)
@@ -36,14 +40,14 @@ function resetMeta() {
 }
 
 async function run() {
-  if (!datasetId.value) return ElMessage.warning('请选择数据集')
+  if (!datasetId.value) return message.warning('请选择数据集')
   running.value = true
   try {
     result.value = await api.cluster.run({ dataset_id: datasetId.value, k: k.value })
     resetMeta()
-    ElMessage.success(`聚类完成，共 ${result.value.total} 张图像`)
+    message.success(`聚类完成，共 ${result.value.total} 张图像`)
   } catch (e) {
-    ElMessage.error(String(e.response?.data?.detail || e.message).slice(0, 200))
+    message.error(String(e.response?.data?.detail || e.message).slice(0, 200))
   } finally {
     running.value = false
   }
@@ -66,12 +70,12 @@ async function apply() {
     for (const iid of clusterImages(c)) assignments[iid] = m.category_id
     named++
   }
-  if (!named) return ElMessage.warning('请先为至少一个聚类选择类别')
-  if (!Object.keys(assignments).length) return ElMessage.warning('没有可生成的标注')
+  if (!named) return message.warning('请先为至少一个聚类选择类别')
+  if (!Object.keys(assignments).length) return message.warning('没有可生成的标注')
   applying.value = true
   try {
     const r = await api.cluster.apply({ assignments })
-    ElMessage.success(`已生成 ${r.created} 条伪标注，可在标注工作台查看修正`)
+    message.success(`已生成 ${r.created} 条伪标注，可在标注工作台查看修正`)
   } finally {
     applying.value = false
   }
@@ -89,12 +93,10 @@ const fmtSample = (iid) => api.files.imageUrl(iid)
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <span style="font-size:0.85rem;color:#4a433c">数据集</span>
-        <el-select v-model="datasetId" style="width:180px">
-          <el-option v-for="d in datasets" :key="d.id" :value="d.id" :label="`${d.name}（${d.image_count} 张）`" />
-        </el-select>
+        <n-select v-model:value="datasetId" :options="datasetOptions" style="width:180px" />
         <span style="font-size:0.85rem;color:#4a433c">聚类数</span>
-        <el-input-number v-model="k" :min="2" :max="50" style="width:110px" />
-        <el-button type="primary" :loading="running" @click="run">运行聚类</el-button>
+        <n-input-number v-model:value="k" :min="2" :max="50" style="width:110px" />
+        <n-button type="primary" :loading="running" @click="run">运行聚类</n-button>
         <span style="color:#8a8175;font-size:0.8rem">
           无需标注，按图像特征自动分组；为聚类命名后生成伪标注，可作为分类训练数据
         </span>
@@ -106,7 +108,7 @@ const fmtSample = (iid) => api.files.imageUrl(iid)
         <span style="font-size:0.9rem;color:#4a433c">
           {{ result.total }} 张图像 → {{ result.clusters.length }} 个聚类
         </span>
-        <el-button type="success" :loading="applying" @click="apply">生成伪标注</el-button>
+        <n-button type="success" :loading="applying" @click="apply">生成伪标注</n-button>
       </div>
 
       <div class="cluster-grid">
@@ -114,22 +116,23 @@ const fmtSample = (iid) => api.files.imageUrl(iid)
              :class="{ ignored: meta[c.id]?.ignored }">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-weight:600;font-size:0.9rem">聚类 {{ c.id }} <span style="color:#8a8175;font-weight:400">（{{ c.size }} 张）</span></span>
-            <el-switch v-model="meta[c.id].ignored" size="small" active-text="忽略" />
+            <div style="display:flex;align-items:center;gap:6px">
+              <n-switch v-model:value="meta[c.id].ignored" size="small" />
+              <span style="font-size:0.78rem;color:var(--text-muted)">忽略</span>
+            </div>
           </div>
           <div class="sample-grid">
-            <el-image v-for="iid in c.samples" :key="iid" :src="fmtSample(iid)" fit="cover"
-                      style="width:100%;aspect-ratio:1;border-radius:3px" />
+            <n-image v-for="iid in c.samples" :key="iid" :src="fmtSample(iid)" object-fit="cover"
+                     style="width:100%;aspect-ratio:1;border-radius:3px" />
           </div>
           <div style="margin-top:8px">
-            <el-select v-model="meta[c.id].category_id" placeholder="选择缺陷类别" size="small"
-                       style="width:100%" :disabled="meta[c.id]?.ignored" clearable>
-              <el-option v-for="cat in categories" :key="cat.id" :value="cat.id" :label="cat.name" />
-            </el-select>
+            <n-select v-model:value="meta[c.id].category_id" placeholder="选择缺陷类别" size="small"
+                      style="width:100%" :disabled="meta[c.id]?.ignored" clearable :options="categoryOptions" />
           </div>
         </div>
       </div>
     </template>
-    <el-empty v-else description="选择数据集并运行聚类" :image-size="80" style="margin-top:60px" />
+    <n-empty v-else description="选择数据集并运行聚类" :image-size="80" style="margin-top:60px" />
   </div>
 </template>
 
@@ -145,4 +148,6 @@ const fmtSample = (iid) => api.files.imageUrl(iid)
   grid-template-columns: repeat(4, 1fr);
   gap: 4px;
 }
+.sample-grid .n-image { width: 100%; height: 100%; display: block; }
+.sample-grid .n-image :deep(img) { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
 </style>

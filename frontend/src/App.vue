@@ -8,6 +8,7 @@ import {
 import { routes } from './router'
 import { api } from './api'
 import { naiveThemeOverrides, darkTheme } from './theme'
+import ReviewBox from './components/ReviewBox.vue'
 import {
   Grid, Compass, FolderOpened, EditPen, MagicStick, DataAnalysis,
   VideoPlay, TrendCharts, PieChart, Box, Monitor, Fold, Expand, Refresh,
@@ -135,6 +136,7 @@ function refresh() { router.replace({ path: route.path, query: { ...route.query,
               <router-view />
             </n-layout-content>
           </n-layout>
+          <ReviewBox />
         </div>
       </n-dialog-provider>
     </n-message-provider>
