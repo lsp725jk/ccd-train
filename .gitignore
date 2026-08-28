@@ -27,6 +27,11 @@ demo_data/
 *.log
 *.bak
 
+# ---- 打包产物（PyInstaller / Inno Setup） ----
+backend/build/
+backend/dist/
+backend/dist_installer/
+
 # ---- 第三方 vendored 源码（体积大，可从 PyPI 重新获取） ----
 third_party/
 

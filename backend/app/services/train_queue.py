@@ -123,8 +123,13 @@ def _run(task_id: int) -> None:
                     env = dict(os.environ)
                     env["NO_ALBUMENTATIONS_UPDATE"] = "1"
                     env.setdefault("HF_HUB_OFFLINE", "1")
+                    if getattr(sys, "frozen", False):
+                        # 冻结版：无法 python -m，改走 --engine-runner 子进程模式
+                        cmd = [sys.executable, "--engine-runner", module, str(cfg_path)]
+                    else:
+                        cmd = [sys.executable, "-m", module, "--config", str(cfg_path)]
                     p = subprocess.Popen(
-                        [sys.executable, "-m", module, "--config", str(cfg_path)],
+                        cmd,
                         stdout=logf, stderr=subprocess.STDOUT,
                         cwd=BACKEND_DIR, creationflags=subprocess.CREATE_NO_WINDOW,
                         env=env,

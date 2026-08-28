@@ -6,6 +6,7 @@
 import importlib
 import os
 import pkgutil
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -41,13 +42,30 @@ app.mount("/runs", StaticFiles(directory=RUNS_DIR), name="runs")
 
 from app import routers as routers_pkg  # noqa: E402
 
-for mod_info in pkgutil.iter_modules(routers_pkg.__path__):
-    mod = importlib.import_module(f"app.routers.{mod_info.name}")
+# 冻结版（PyInstaller）下 pkgutil 可能无法枚举包内模块，显式回退
+_FROZEN_ROUTERS = [
+    "annotations", "cluster", "curves", "dashboard", "datasets", "export",
+    "files", "fs", "models", "prediction", "preprocess", "projects",
+    "review", "sam", "scenes", "train", "xal",
+]
+
+_mods = []
+try:
+    _mods = [m.name for m in pkgutil.iter_modules(routers_pkg.__path__)]
+except Exception:
+    _mods = []
+if not _mods and getattr(sys, "frozen", False):
+    _mods = _FROZEN_ROUTERS
+
+for _name in _mods:
+    mod = importlib.import_module(f"app.routers.{_name}")
     if hasattr(mod, "router"):
-        app.include_router(mod.router, prefix="/api", tags=[mod_info.name])
+        app.include_router(mod.router, prefix="/api", tags=[_name])
 
 # ---- 生产模式：托管前端构建产物（dist 存在时启用，单端口访问） ----
-DIST_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+# 打包版：CCD_WEBUI_DIR 指向资源目录内的 webui
+DIST_DIR = Path(os.environ.get("CCD_WEBUI_DIR") or
+                 (Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"))
 if DIST_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
 
