@@ -125,6 +125,10 @@ async function loadAnns() {
   if (!currentImage.value) { anns.value = []; return }
   anns.value = await api.annotations.list(currentImage.value.id)
   selected.value = null
+  editingId.value = null
+  hist.value = []
+  histPtr.value = -1
+  pushHist()  // 基线快照（撤销回退到此）
   renderOverlay()
 }
 
@@ -202,6 +206,141 @@ const catColor = computed(() => categories.value.find(c => c.id === catId.value)
 // 「正常」为常驻整图分类，与缺陷类别分开展示
 const normalCat = computed(() => categories.value.find(c => c.name === '正常') || null)
 const defectCats = computed(() => categories.value.filter(c => c.name !== '正常'))
+
+// ---- 撤销/重做（移植 X-AnyLabeling 的 undo_shape_edit 模式） ----
+// 快照保存 anns 全量；undo/redo 恢复后全量重建服务端（与 xal_sync 全量回写同策略）
+const hist = ref([])          // 快照栈（JSON 字符串）
+const histPtr = ref(-1)
+const HIST_MAX = 60
+const canUndo = computed(() => histPtr.value > 0)
+const canRedo = computed(() => histPtr.value < hist.value.length - 1)
+
+function pushHist() {
+  const s = JSON.stringify(anns.value)
+  hist.value = hist.value.slice(0, histPtr.value + 1)
+  hist.value.push(s)
+  if (hist.value.length > HIST_MAX) hist.value.shift()
+  histPtr.value = hist.value.length - 1
+}
+
+async function restoreFromSnapshot(prevStr) {
+  const prev = JSON.parse(prevStr)
+  // 全量重建该图像标注（服务端与视图一致）
+  for (const a of anns.value) {
+    try { await api.annotations.remove(a.id) } catch { /* ignore */ }
+  }
+  anns.value = []
+  for (const a of prev) {
+    try {
+      // 快照中 data 可能是 JSON 字符串（列表接口原样返回），需解析为对象再提交
+      const data = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
+      const r = await api.annotations.create({
+        image_id: a.image_id, category_id: a.category_id,
+        type: a.type, data, source: a.source,
+      })
+      anns.value.push(r)
+    } catch { /* ignore */ }
+  }
+  selected.value = null
+  editingId.value = null
+  refreshBadge(0)
+  renderOverlay()
+}
+
+async function undo() {
+  if (!canUndo.value) return
+  histPtr.value--
+  await restoreFromSnapshot(hist.value[histPtr.value])
+}
+async function redo() {
+  if (!canRedo.value) return
+  histPtr.value++
+  await restoreFromSnapshot(hist.value[histPtr.value])
+}
+
+// ---- 选中标注的形状编辑（X-AnyLabeling 的 move_by / move_vertex_by / nearest_vertex） ----
+const editOp = ref(null)      // {kind: move/resize/vertex/polyMove, id, start, base}
+
+function hitTestSelected(p) {
+  const a = anns.value.find(x => x.id === selected.value)
+  if (!a) return null
+  const d = typeof a.data === 'string' ? JSON.parse(a.data) : (a.data || {})
+  if (a.type === 'box' && d.x1 != null) {
+    const r = 10
+    const corners = [[d.x1, d.y1], [d.x2, d.y1], [d.x1, d.y2], [d.x2, d.y2]]
+    for (let i = 0; i < 4; i++) {
+      if (Math.abs(p.x - corners[i][0]) <= r && Math.abs(p.y - corners[i][1]) <= r) {
+        return { kind: 'resize', corner: i }
+      }
+    }
+    if (p.x >= d.x1 && p.x <= d.x2 && p.y >= d.y1 && p.y <= d.y2) return { kind: 'move' }
+    return null
+  }
+  if ((a.type === 'mask' || a.type === 'shield') && d.points?.length) {
+    let best = -1, bestD = 12
+    for (let i = 0; i < d.points.length; i++) {
+      const dist = Math.hypot(p.x - d.points[i][0], p.y - d.points[i][1])
+      if (dist < bestD) { bestD = dist; best = i }
+    }
+    if (best >= 0) return { kind: 'vertex', vi: best }
+    if (pointInPolygon(p.x, p.y, d.points)) return { kind: 'polyMove' }
+    return null
+  }
+  return null
+}
+
+function beginEdit(p) {
+  const hit = hitTestSelected(p)
+  if (!hit) return false
+  const a = anns.value.find(x => x.id === selected.value)
+  const d = typeof a.data === 'string' ? JSON.parse(a.data) : (a.data || {})
+  editOp.value = { ...hit, id: a.id, start: { x: p.x, y: p.y }, base: JSON.parse(JSON.stringify(d)) }
+  return true
+}
+
+function applyEdit(p) {
+  if (!editOp.value) return
+  const op = editOp.value
+  const dx = p.x - op.start.x
+  const dy = p.y - op.start.y
+  const a = anns.value.find(x => x.id === op.id)
+  if (!a) return
+  const d = op.base
+  if (op.kind === 'move') {
+    if (a.type === 'box') {
+      d.x1 = op.base.x1 + dx; d.y1 = op.base.y1 + dy
+      d.x2 = op.base.x2 + dx; d.y2 = op.base.y2 + dy
+    } else {
+      d.points = op.base.points.map(([x, y]) => [x + dx, y + dy])
+    }
+  } else if (op.kind === 'resize') {
+    const c = op.corner
+    if (c === 0) { d.x1 = op.base.x1 + dx; d.y1 = op.base.y1 + dy }
+    else if (c === 1) { d.x2 = op.base.x2 + dx; d.y1 = op.base.y1 + dy }
+    else if (c === 2) { d.x1 = op.base.x1 + dx; d.y2 = op.base.y2 + dy }
+    else { d.x2 = op.base.x2 + dx; d.y2 = op.base.y2 + dy }
+    if (d.x2 < d.x1) [d.x1, d.x2] = [d.x2, d.x1]
+    if (d.y2 < d.y1) [d.y1, d.y2] = [d.y2, d.y1]
+  } else if (op.kind === 'vertex') {
+    d.points = op.base.points.map((pt, i) => i === op.vi ? [pt[0] + dx, pt[1] + dy] : pt)
+  }
+  a.data = d
+  renderOverlay()
+}
+
+async function endEdit() {
+  if (!editOp.value) return
+  const { id } = editOp.value
+  editOp.value = null
+  pushHist()
+  const a = anns.value.find(x => x.id === id)
+  if (a) {
+    try {
+      const data = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
+      await api.annotations.update(id, { data })
+    } catch { /* ignore */ }
+  }
+}
 
 // 笔刷光标圈：独立覆盖层，避免全量重绘
 const cursorCanvas = ref(null)
@@ -317,6 +456,36 @@ function renderOverlay() {
       _drawLabel(ctx, a.category_name, x, y - 16, color)
     }
     ctx.restore()
+  }
+
+  // 选中标注的编辑手柄（移植 X-AnyLabeling：框四角缩放点 / 多边形顶点）
+  if (selected.value != null && !editingId.value) {
+    const sel = anns.value.find(a => a.id === selected.value)
+    if (sel) {
+      const d = typeof sel.data === 'string' ? JSON.parse(sel.data || '{}') : (sel.data || {})
+      ctx.save()
+      if (sel.type === 'box' && d.x1 != null) {
+        const h = 8
+        for (const [hx, hy] of [[d.x1, d.y1], [d.x2, d.y1], [d.x1, d.y2], [d.x2, d.y2]]) {
+          ctx.fillStyle = '#ffffff'
+          ctx.strokeStyle = '#1b365d'
+          ctx.lineWidth = 1.5
+          ctx.fillRect(hx * s - h / 2, hy * s - h / 2, h, h)
+          ctx.strokeRect(hx * s - h / 2, hy * s - h / 2, h, h)
+        }
+      } else if ((sel.type === 'mask' || sel.type === 'shield') && d.points?.length) {
+        for (const [vx, vy] of d.points) {
+          ctx.fillStyle = '#ffffff'
+          ctx.strokeStyle = '#1b365d'
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.arc(vx * s, vy * s, 4, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.stroke()
+        }
+      }
+      ctx.restore()
+    }
   }
 
   // 正在拖拽的矩形框
@@ -526,6 +695,14 @@ function onMouseDown(e) {
     if (e.button === 0) samDragStart.value = toImgCoord(e)
     return
   }
+  // 形状编辑：按下位置命中选中标注（框角/框内/多边形顶点/多边形内）→ 优先编辑而非新建
+  if (mode.value !== 'class') {
+    const hp = toImgCoord(e)
+    if (beginEdit(hp)) {
+      e.preventDefault()
+      return
+    }
+  }
   if (mode.value === 'polygon') {
     const p = toImgCoord(e)
     polyPts.value.push([p.x, p.y])
@@ -559,6 +736,10 @@ function onMouseMove(e) {
   if (panning.value && panStart) {
     canvasScroll.value.scrollLeft = panStart.sx - (e.clientX - panStart.x)
     canvasScroll.value.scrollTop = panStart.sy - (e.clientY - panStart.y)
+    return
+  }
+  if (editOp.value) {
+    applyEdit(toImgCoord(e))
     return
   }
   if (brushing.value) {
@@ -598,6 +779,10 @@ function onMouseMove(e) {
 }
 
 async function onMouseUp(e) {
+  if (editOp.value) {
+    await endEdit()
+    return
+  }
   if (panning.value) {
     panning.value = false
     panStart = null
@@ -651,6 +836,7 @@ async function onMouseUp(e) {
         type: 'mask', data: { points: pts }, source: 'manual',
       })
       anns.value.push(a)
+      pushHist()
       refreshBadge(1)
     }
     renderOverlay()
@@ -669,6 +855,7 @@ async function onMouseUp(e) {
     type: 'box', data: { x1, y1, x2, y2 }, source: 'manual',
   })
   anns.value.push(a)
+  pushHist()
   refreshBadge(1)
 }
 
@@ -705,6 +892,7 @@ async function submitBrush() {
       }
       refreshBadge(1)
     }
+    pushHist()  // 笔刷创建/逐像素编辑后记录历史
   } finally {
     brushRaw = []
     renderOverlay()
@@ -721,6 +909,21 @@ function hitMask(p, onlyId = null) {
     const pts = d.points || []
     if (pts.length < 3) continue
     if (pointInPolygon(p.x, p.y, pts)) return a.id
+  }
+  return null
+}
+
+/** 画布点选：命中标注（框内 / 多边形内，后画的在上层优先） */
+function findAnnoAt(p) {
+  for (let i = anns.value.length - 1; i >= 0; i--) {
+    const a = anns.value[i]
+    if (a.type === 'class') continue
+    const d = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
+    if (a.type === 'box' && d.x1 != null) {
+      if (p.x >= d.x1 && p.x <= d.x2 && p.y >= d.y1 && p.y <= d.y2) return a
+    } else if ((a.type === 'mask' || a.type === 'shield') && d.points?.length >= 3) {
+      if (pointInPolygon(p.x, p.y, d.points)) return a
+    }
   }
   return null
 }
@@ -762,6 +965,7 @@ async function confirmSam() {
     anns.value.push(a)
   }
   refreshBadge(n)
+  pushHist()
   clearSam()
   message.success(`已生成 ${n} 个掩码`)
 }
@@ -792,14 +996,26 @@ async function onCanvasClick(e) {
       old.category_id = catId.value
       old.category_name = categories.value.find(c => c.id === catId.value)?.name
       old.color = categories.value.find(c => c.id === catId.value)?.color
+      pushHist()
     } else {
       const a = await api.annotations.create({
         image_id: currentImage.value.id, category_id: catId.value, type: 'class', data: {}, source: 'manual',
       })
       anns.value.push(a)
+      pushHist()
       refreshBadge(1)
     }
+    return
   }
+  // 画布点选：命中标注 → 选中（随后可拖拽编辑）；空白处 → 取消选中
+  const p = toImgCoord(e)
+  const hit = findAnnoAt(p)
+  if (hit) {
+    selected.value = hit.id
+  } else {
+    selected.value = null
+  }
+  renderOverlay()
 }
 
 // ---- 多边形：完成 / 双击闭合 ----
@@ -813,6 +1029,7 @@ async function finishPolygon() {
     type: 'mask', data: { points: pts.map(p => [p[0], p[1]]) }, source: 'manual',
   })
   anns.value.push(a)
+  pushHist()
   polyPts.value = []
   polyPreview.value = null
   refreshBadge(1)
@@ -836,6 +1053,7 @@ async function removeSelected() {
   anns.value = anns.value.filter(a => a.id !== selected.value)
   if (editingId.value === selected.value) editingId.value = null
   selected.value = null
+  pushHist()
   refreshBadge(-1)
 }
 
@@ -889,7 +1107,14 @@ function nextImage(dir) {
 
 function keyHandler(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-  if (e.ctrlKey || e.metaKey || e.altKey) return
+  // 撤销/重做（Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y）
+  if (e.ctrlKey || e.metaKey) {
+    const k = e.key.toLowerCase()
+    if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo() }
+    else if (k === 'y') { e.preventDefault(); redo() }
+    return
+  }
+  if (e.altKey) return
   if (e.key === 'ArrowRight') nextImage(1)
   else if (e.key === 'ArrowLeft') nextImage(-1)
   else if (e.key === 'Delete' || e.key === 'Backspace') removeSelected()
@@ -1039,15 +1264,15 @@ const imgUrl = ref('')
               <span style="font-size:0.8rem;color:#8a8175">{{ fillMode ? '填充' : '轮廓' }}</span>
             </span>
             <span style="color:#8a8175;font-size:0.8rem">
-              {{ mode === 'box' ? '拖拽画框 · 热键 B · 点击框可选中，Delete 删除' :
-                 mode === 'polygon' ? '左键单击加点 · 热键 P · 完成按钮/双击闭合，Esc 取消' :
-                 mode === 'ellipse' ? '拖拽画椭圆 · 热键 E · 松手生成掩码' :
+              {{ mode === 'box' ? '拖拽画框 · 热键 B · 点击框选中，拖四角缩放/拖框移动，Delete 删除' :
+                 mode === 'polygon' ? '左键单击加点 · 热键 P · 完成/双击闭合，Esc 取消；选中后拖顶点/整体移动' :
+                 mode === 'ellipse' ? '拖拽画椭圆 · 热键 E · 松手生成掩码；选中后拖顶点编辑' :
                  mode === 'class' ? '点击图像设置整图类别 · 热键 C' :
                  mode === 'sam' ? '拖拽画框 · 热键 S · 左键加正点，右键加负点，确认生成掩码' :
                  mode === 'pan' ? '按住左键拖拽平移 · 热键 M · 中键平移，滚轮缩放' :
                  mode === 'eraser' ? '橡皮擦：按住涂抹擦除 · 热键 X · Shift+滚轮调大小' :
                  mode === 'shield' ? '掩膜：涂抹屏蔽区 · 热键 H · 该区域不参与训练，橡皮擦可擦除' :
-                 '画笔：拖到哪画到哪 · 热键 R · Shift+滚轮调粗细，松手成掩码' }}
+                 '画笔：拖到哪画到哪 · 热键 R · Shift+滚轮调粗细，松手成掩码；Ctrl+Z 撤销' }}
             </span>
             <span v-if="mode === 'brush' || mode === 'eraser'" style="display:flex;align-items:center;gap:6px">
               <span style="font-size:0.8rem;color:#4a433c">{{ mode === 'eraser' ? '橡皮' : '笔刷' }}</span>
@@ -1056,6 +1281,8 @@ const imgUrl = ref('')
             <span v-if="editingId" style="color:#e15759;font-size:0.8rem">● 编辑中</span>
             <span v-if="samLoading" style="color:#4a6b4a;font-size:0.8rem">SAM 推理中…</span>
             <div style="flex:1"></div>
+            <n-button size="small" :disabled="!canUndo" :title="'撤销 (Ctrl+Z)'" @click="undo">撤销</n-button>
+            <n-button size="small" :disabled="!canRedo" :title="'重做 (Ctrl+Shift+Z)'" @click="redo">重做</n-button>
             <span style="font-size:0.8rem;color:#8a8175">
               坐标 {{ gridPos ? `(${gridPos.x}, ${gridPos.y})` : '(--, --)' }}
             </span>
