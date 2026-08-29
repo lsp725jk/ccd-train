@@ -71,8 +71,9 @@ if DIST_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     def spa(full_path: str):
-        target = DIST_DIR / full_path
-        if full_path and target.is_file():
+        # 路径穿越防护：解析后必须仍在 DIST_DIR 内（否则回退 index.html）
+        target = (DIST_DIR / full_path).resolve()
+        if full_path and target.is_file() and target.is_relative_to(DIST_DIR.resolve()):
             return FileResponse(target)
         return FileResponse(DIST_DIR / "index.html")  # SPA history 路由回退
 
