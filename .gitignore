@@ -21,10 +21,12 @@ frontend/dist/
 backend/data/
 labelstudio/data/
 backend/*.log
+backend/*.log.err
 backend/*.pt
 backend/*.onnx
 demo_data/
 *.log
+*.log.err
 *.bak
 
 # ---- 打包产物（PyInstaller / Inno Setup） ----
