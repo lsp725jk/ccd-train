@@ -58,10 +58,34 @@ def _engine_runner(module: str, cfg_path: str) -> int:
         return 1
 
 
+def _acquire_single_instance() -> bool:
+    """Windows 单实例互斥体（与 installer.iss 的 AppMutex 同名）。
+
+    双开会导致两个实例共享同一 SQLite → database is locked / 状态错乱。
+    """
+    if sys.platform != "win32" or getattr(sys, "frozen", False) is False:
+        return True
+    try:
+        import ctypes
+        ERROR_ALREADY_EXISTS = 183
+        kernel32 = ctypes.windll.kernel32
+        mutex = kernel32.CreateMutexW(None, False, "CCDTrain_SingleInstance")
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            kernel32.CloseHandle(mutex)
+            return False
+        return True
+    except Exception:
+        return True  # 互斥失败不阻塞启动（尽力而为）
+
+
 def main() -> int:
     if "--engine-runner" in sys.argv:
         idx = sys.argv.index("--engine-runner")
         return _engine_runner(sys.argv[idx + 1], sys.argv[idx + 2])
+
+    if not _acquire_single_instance():
+        print("CCD Train 已在运行（单实例），本次启动退出", flush=True)
+        return 0
 
     base = base_dir()
     res = resource_dir()

@@ -1,11 +1,22 @@
 # -*- coding: utf-8 -*-
-"""共享 fixture：TestClient、测试项目、demo 数据集。"""
+"""共享 fixture：TestClient、测试项目、demo 数据集。
+
+测试隔离（P1 修复）：import app 前把 CCD_BACKEND_DIR 指向临时目录，
+DB/RUNS 全部落在临时库，绝不触碰生产库 backend/data/ccd.db。
+"""
+import os
+import tempfile
+from pathlib import Path
+
+_TMP = tempfile.mkdtemp(prefix="ccd_test_")
+os.environ["CCD_BACKEND_DIR"] = _TMP  # 必须在 import app 之前设置（app.config 导入时读取）
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
-DEMO_DATA = r"E:\Hanako\OH-WorkSpace\ccd-train\demo_data"
+DEMO_DATA = str(Path(__file__).resolve().parents[2] / "demo_data")  # ccd-train/demo_data
 
 
 @pytest.fixture(scope="module")

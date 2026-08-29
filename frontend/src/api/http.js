@@ -1,5 +1,8 @@
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { createDiscreteApi } from 'naive-ui'
+
+// 用 Naive UI 的离散 API（无需组件上下文），替代 element-plus 的 ElMessage
+const { message } = createDiscreteApi(['message'])
 
 const http = axios.create({ baseURL: '/api', timeout: 60000 })
 
@@ -10,7 +13,7 @@ http.interceptors.response.use(
       let detail = err.response?.data?.detail
       if (Array.isArray(detail)) detail = detail.map(d => d.msg || JSON.stringify(d)).join('; ')
       const msg = detail || err.message || '请求失败'
-      ElMessage.error(String(msg).slice(0, 200))
+      message.error(String(msg).slice(0, 200))
     }
     return Promise.reject(err)
   },

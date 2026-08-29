@@ -140,6 +140,9 @@ async function loadImages() {
   await selectImage()
 }
 
+// 切图竞态防护（P1）：快速切换图像时，过期请求的响应不得覆盖当前图像状态
+let annsReqSeq = 0
+
 async function selectImage() {
   const im = images.value[imageIdx.value]
   if (!im) { currentImage.value = null; imgUrl.value = ''; anns.value = []; return }
@@ -157,8 +160,17 @@ async function selectImage() {
 
 async function loadAnns() {
   if (!currentImage.value) { anns.value = []; return }
+  const seq = ++annsReqSeq
+  const imId = currentImage.value.id
   clearMaskBits()
-  anns.value = await api.annotations.list(currentImage.value.id)
+  let list
+  try {
+    list = await api.annotations.list(imId)
+  } catch {
+    return
+  }
+  if (seq !== annsReqSeq || !currentImage.value || currentImage.value.id !== imId) return  // 过期响应丢弃
+  anns.value = list
   selected.value = null
   editingId.value = null
   hist.value = []
@@ -216,8 +228,19 @@ function initOverlayCanvas() {
   drawCursor()
 }
 
+// 浏览器 canvas 单边上限 16384px；displayScale 超限时 canvas 尺寸溢出 → 画布空白。
+// 按当前图像尺寸动态计算缩放上限（留余量，滚动容器渲染开销也受控）
+const MAX_CANVAS_SIDE = 8192
+function zoomLimit() {
+  const w = currentImage.value?.width || 1
+  const h = currentImage.value?.height || 1
+  const base = Math.max(w, h) * (fitScale.value || 1)
+  return Math.min(64, Math.max(1, MAX_CANVAS_SIDE / base))
+}
+
 function zoomBy(factor) {
-  viewScale.value = Math.min(64, Math.max(0.2, viewScale.value * factor))
+  const lim = zoomLimit()
+  viewScale.value = Math.min(lim, Math.max(0.2, viewScale.value * factor))
   updateDisplay()
 }
 

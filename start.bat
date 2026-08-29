@@ -17,6 +17,6 @@ echo 地址: http://localhost:8000 （浏览器将自动打开）
 echo 按 Ctrl+C 停止服务
 echo.
 
-start "" http://localhost:8000
+REM 浏览器在服务启动后自动打开（由后端就绪探测触发，避免先开失败页）
 cd backend
-.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000

@@ -75,8 +75,9 @@ function onFabUp() {
 }
 function hideFab() { hidden.value = true; enabled.value = false; persistPrefs() }
 
+// 用 route.path（不含 query）作标注键：App 刷新按钮的 _t query 不影响匹配（P1 修复）
 const currentRouteMarks = computed(() =>
-  marks.value.filter(m => m.route === route.fullPath))
+  marks.value.filter(m => m.route === route.path))
 
 async function load() {
   try { marks.value = await api.review.list() } catch { marks.value = [] }
@@ -109,7 +110,7 @@ async function saveMark() {
   const vw = window.innerWidth, vh = window.innerHeight
   try {
     await api.review.create({
-      route: route.fullPath,
+      route: route.path,
       project_id: route.params.pid ? Number(route.params.pid) : null,
       comment: p.comment.trim(),
       rects: [{

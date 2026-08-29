@@ -48,7 +48,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["matplotlib", "pytest", "IPython", "PySide6", "tkinter", "notebook"],
+    # 注意：不能 excludes matplotlib —— ultralytics 训练收尾 plot_results
+    # 在函数作用域 import matplotlib，排除会导致冻结版 YOLO 训练结束即 ImportError
+    #（权重已训完但任务被判 failed）。代价：安装包 +30~60MB。
+    excludes=["pytest", "IPython", "PySide6", "tkinter", "notebook"],
     noarchive=False,
     optimize=0,
 )

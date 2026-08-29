@@ -115,9 +115,11 @@ function switchTab(t) {
 }
 
 let timer = null
+let refreshSeq = 0
 function refresh() {
   clearTimeout(timer)
   timer = setTimeout(async () => {
+    const seq = ++refreshSeq
     const enabled = pipeline.value.filter(o => o.enabled)
     if (!imageId.value || !enabled.length) { previewImg.value = ''; soloImgs.value = []; return }
     previewing.value = true
@@ -131,25 +133,30 @@ function refresh() {
             : await api.preview.augment({ image_id: imageId.value, augs: ops, seed: 42 + i })
           return { label: op.label, image: r.image }
         }))
+        if (seq !== refreshSeq) return  // 过期预览丢弃
         soloImgs.value = results
       } else {
         const ops = enabled.map(o => ({ name: o.name, params: o.params }))
         const r = tab.value === 'preprocess'
           ? await api.preview.preprocess({ image_id: imageId.value, ops })
           : await api.preview.augment({ image_id: imageId.value, augs: ops, seed: 42 })
+        if (seq !== refreshSeq) return  // 过期预览丢弃
         previewImg.value = r.image
       }
     } catch (e) {
+      if (seq !== refreshSeq) return
       previewImg.value = ''
       soloImgs.value = []
       const detail = e.response?.data?.detail || e.message || '预览失败'
       message.error(String(detail).slice(0, 200))
     } finally {
-      previewing.value = false
+      if (seq === refreshSeq) previewing.value = false
     }
   }, 400)
 }
 watch([tab, imageId, pipeline], refresh, { deep: true })
+// P1 修复：tab 切换（预处理/增强）时重载对应类型的管线列表（此前只首次加载）
+watch(tab, () => { loadPipelines() })
 
 function loadPipeline(p) {
   // 后端 list_pipelines 返回原始行，ops 是 JSON 字符串，需先解析为数组

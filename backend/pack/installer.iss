@@ -22,7 +22,11 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
-CloseApplications=no
+; P1 修复：卸载/升级前先关闭运行中的实例（文件占用导致覆盖失败/卸载残留）
+CloseApplications=yes
+RestartApplications=no
+; P1 修复：单实例互斥（与 launcher 的互斥体同名），防止双开共享 SQLite
+AppMutex=CCDTrain_SingleInstance
 ; 磁盘提示
 DiskSpanning=no
 ; 版本信息
@@ -36,7 +40,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
 
 [Files]
-Source: "..\dist\CCDTrain\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; P1 修复：Excludes 排除运行时数据目录 data/（开发者数据库/训练产物不入包）。
+; 注意：不能排除 *.pt —— _internal 资源内的预训练权重是 launcher 首启复制源。
+Source: "..\dist\CCDTrain\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\*"
 
 [Icons]
 Name: "{group}\CCD Train"; Filename: "{app}\{#MyAppExeName}"
