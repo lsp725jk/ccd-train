@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { isDark, onThemeChange } from '../utils/theme'
 
 const props = defineProps({

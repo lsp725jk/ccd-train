@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { NSelect, NEmpty } from 'naive-ui'
 import { api } from '../api'
 import { isDark, onThemeChange } from '../utils/theme'

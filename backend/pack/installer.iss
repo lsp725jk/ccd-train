@@ -1,9 +1,12 @@
 ; CCD Train 缺陷检测训练平台 - 安装程序脚本
-; 编译：ISCC.exe installer.iss
+; 编译：ISCC.exe installer.iss（或运行 pack.bat 一键打包）
 ; 依赖：backend\dist\CCDTrain\（PyInstaller 产物）
+; 版本：单源 backend\pack\VERSION，pack.bat 以 /DMyAppVersion= 注入
 
 #define MyAppName "CCD Train"
-#define MyAppVersion "0.2.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.2.0"
+#endif
 #define MyAppExeName "CCDTrain.exe"
 
 [Setup]
