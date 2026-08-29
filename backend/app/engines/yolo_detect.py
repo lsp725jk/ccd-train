@@ -63,6 +63,7 @@ class YoloDetectEngine(EngineBase):
                 split = im["split"] if im["split"] in ("train", "val", "test") else "train"
                 img_name = f"{ds['id']}_{im['id']:07d}{Path(im['rel_path']).suffix.lower()}"
                 dst_img = data_dir / split / "images" / img_name
+                nw = nh = 0  # 落盘图像实际尺寸（标签归一化基准，P0 修复：预处理 resize 后不得用 DB 原始尺寸）
                 if not dst_img.exists():
                     try:
                         if pipeline_ops:
@@ -72,21 +73,28 @@ class YoloDetectEngine(EngineBase):
                                 continue
                             out = apply_preprocess(img, pipeline_ops)
                             cv2.imencode(dst_img.suffix.lower() or ".jpg", out)[1].tofile(dst_img)
+                            nw, nh = out.shape[1], out.shape[0]
                         else:
                             shutil.copy2(Path(ds["root_path"]) / im["rel_path"], dst_img)
+                            nw, nh = im["width"], im["height"]
                     except Exception as e:
                         self.log(f"[warn] 图像处理失败 {im['rel_path']}: {e}")
                         continue
+                else:
+                    # 已存在（跨数据集重名去重）：以落盘图实际尺寸为准
+                    sz = cv2.imread(str(dst_img))
+                    if sz is None:
+                        continue
+                    nh, nw = sz.shape[:2]
                 lines = []
                 for a in anns.get(im["id"], []):
                     if a["category_id"] not in idx:
                         continue
                     d = json.loads(a["data"])
-                    w, h = im["width"], im["height"]
                     x1, y1, x2, y2 = d["x1"], d["y1"], d["x2"], d["y2"]
                     lines.append(
-                        f"{idx[a['category_id']]} {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} "
-                        f"{(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}"
+                        f"{idx[a['category_id']]} {(x1 + x2) / 2 / nw:.6f} {(y1 + y2) / 2 / nh:.6f} "
+                        f"{(x2 - x1) / nw:.6f} {(y2 - y1) / nh:.6f}"
                     )
                 if lines:
                     (data_dir / split / "labels" / f"{ds['id']}_{im['id']:07d}.txt").write_text(
