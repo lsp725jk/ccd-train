@@ -34,6 +34,8 @@ const unlabeledFirst = ref(false)
 const showGrid = ref(true)          // 辅助网格叠加
 const gridPos = ref(null)           // 画布内鼠标图像坐标 {x, y}
 let brushRaw = []
+let eraseAccum = []          // 橡皮擦增量待提交点
+let eraseTimer = null        // 节流定时器
 const brushing = ref(false)
 const brushSize = ref(8)
 const panning = ref(false)
@@ -680,6 +682,7 @@ function onMouseDown(e) {
     if (!hit) return message.info('橡皮擦：按住鼠标在要擦除的掩码区域上涂抹')
     editingId.value = hit
     brushRaw = [p]
+    eraseAccum = []
     brushing.value = true
     renderOverlay()
     return
@@ -746,6 +749,13 @@ function onMouseMove(e) {
     const p = toImgCoord(e)
     brushRaw.push(p)
     renderOverlay()
+    // 橡皮擦：增量实时擦除（鼠标拖到哪，掩码立刻少一块），40ms 节流提交
+    if (mode.value === 'eraser') {
+      eraseAccum.push(p)
+      if (!eraseTimer) {
+        eraseTimer = setTimeout(() => { eraseTimer = null; flushErase() }, 40)
+      }
+    }
     return
   }
   if (mode.value === 'sam' && samDragStart.value) {
@@ -790,6 +800,13 @@ async function onMouseUp(e) {
   }
   if (brushing.value) {
     brushing.value = false
+    if (mode.value === 'eraser') {
+      // 橡皮擦：增量已实时提交，这里只补最后一段并清理（掩码可能已被擦完，绝不新建）
+      flushErase()
+      brushRaw = []
+      renderOverlay()
+      return
+    }
     await submitBrush()
     return
   }
@@ -859,13 +876,34 @@ async function onMouseUp(e) {
   refreshBadge(1)
 }
 
+/** 橡皮擦增量提交：把累积的轨迹点擦除到当前编辑掩码，实时更新视图 */
+function flushErase() {
+  if (!eraseAccum.length) return
+  const pts = eraseAccum.map(p => [p.x, p.y])  // 接口要求 [[x,y],...]
+  eraseAccum = []
+  if (!editingId.value) return
+  api.annotations.paint(editingId.value, {
+    points: pts, brush_size: brushSize.value, erase: true,
+  }).then((r) => {
+    const i = anns.value.findIndex(a => a.id === editingId.value)
+    if (i < 0) return
+    if (r.deleted) {
+      anns.value.splice(i, 1)
+      editingId.value = null
+      refreshBadge(-1)
+    } else {
+      anns.value[i] = r
+    }
+    renderOverlay()
+  }).catch(() => { /* 网络抖动忽略，松手时最终提交兜底 */ })
+}
+
 async function submitBrush() {
   if (brushRaw.length < 2) return
   if (!catId.value) return message.warning('请先选择缺陷类别')
   const pts = brushRaw.map(p => [p.x, p.y])
   try {
-    if (editingId.value) {
-      const r = await api.annotations.paint(editingId.value, {
+    if (editingId.value) {      const r = await api.annotations.paint(editingId.value, {
         points: pts, brush_size: brushSize.value, erase: mode.value === 'eraser',
       })
       if (r.deleted) {
@@ -1270,7 +1308,7 @@ const imgUrl = ref('')
                  mode === 'class' ? '点击图像设置整图类别 · 热键 C' :
                  mode === 'sam' ? '拖拽画框 · 热键 S · 左键加正点，右键加负点，确认生成掩码' :
                  mode === 'pan' ? '按住左键拖拽平移 · 热键 M · 中键平移，滚轮缩放' :
-                 mode === 'eraser' ? '橡皮擦：按住涂抹擦除 · 热键 X · Shift+滚轮调大小' :
+                 mode === 'eraser' ? '橡皮擦：实时擦除（鼠标拖到哪擦到哪）· 热键 X · Shift+滚轮调大小' :
                  mode === 'shield' ? '掩膜：涂抹屏蔽区 · 热键 H · 该区域不参与训练，橡皮擦可擦除' :
                  '画笔：拖到哪画到哪 · 热键 R · Shift+滚轮调粗细，松手成掩码；Ctrl+Z 撤销' }}
             </span>
