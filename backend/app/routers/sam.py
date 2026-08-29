@@ -19,7 +19,7 @@ SAM_CONF = 0.25        # SAM 推理置信度阈值
 MAX_POLYS = 3          # 单次推理最多保留的多边形数
 MIN_POLY_AREA = 30     # 小于该面积的轮廓忽略（像素）
 MAX_PAINT_SIDE = 1024  # 逐像素编辑时降采样最长边
-POLY_EPS = 2.0         # 轮廓简化精度（像素）
+POLY_EPS = 0.5         # 轮廓简化精度（像素）；0.5 让多边形更贴合掩码边界，适配像素级精修
 
 class SamPredictRequest(BaseModel):
     image_id: int

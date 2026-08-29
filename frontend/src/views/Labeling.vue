@@ -184,12 +184,18 @@ function initOverlayCanvas() {
 }
 
 function zoomBy(factor) {
-  viewScale.value = Math.min(8, Math.max(0.2, viewScale.value * factor))
+  viewScale.value = Math.min(64, Math.max(0.2, viewScale.value * factor))
   updateDisplay()
 }
 
 function zoomReset() {
   viewScale.value = 1
+  updateDisplay()
+}
+
+/** 1:1 原始像素视图（1 图像像素 = 1 屏幕像素，像素级精修用） */
+function zoomPixel1to1() {
+  viewScale.value = 1 / (fitScale.value || 1)
   updateDisplay()
 }
 
@@ -385,7 +391,8 @@ function renderOverlay() {
   if (showGrid.value) {
     const imgW = currentImage.value?.width || cw / s
     const imgH = currentImage.value?.height || ch / s
-    const step = 40  // 网格间距（图像像素），根据缩放自适应提密度
+    // 像素级精度：1:1 及以上显示逐像素网格，高倍率清晰可见
+    const step = s >= 1 ? 1 : (s >= 0.5 ? 2 : Math.max(8, Math.ceil(24 / s)))
     ctx.save()
     ctx.strokeStyle = 'rgba(75,120,160,0.18)'
     ctx.lineWidth = 1
@@ -1330,6 +1337,7 @@ const imgUrl = ref('')
             <n-button size="small" @click="zoomBy(1.25)"><n-icon><ZoomIn /></n-icon></n-button>
             <n-button size="small" @click="zoomBy(0.8)"><n-icon><ZoomOut /></n-icon></n-button>
             <n-button size="small" @click="zoomReset"><n-icon><FullScreen /></n-icon><span style="margin-left:3px">适应</span></n-button>
+            <n-button size="small" title="1:1 原始像素（像素级精修）" @click="zoomPixel1to1">1:1</n-button>
             <n-button size="small" @click="nextImage(-1)"><n-icon><ArrowLeft /></n-icon><span style="margin-left:3px">上一张</span></n-button>
             <n-button size="small" type="primary" @click="nextImage(1)">下一张<n-icon style="margin-left:3px"><ArrowRight /></n-icon></n-button>
           </div>

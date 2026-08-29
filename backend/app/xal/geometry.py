@@ -138,7 +138,7 @@ def ellipse_center_radii(points: Sequence[Sequence[float]]) -> tuple:
 # ---------------------------------------------------------------------------
 
 def mask_to_polygons(mask: np.ndarray, max_polys: int = 3,
-                     eps: float = 2.0) -> list[list[list[float]]]:
+                     eps: float = 0.5) -> list[list[list[float]]]:
     """bool 掩码 → 简化多边形列表（按面积降序，取前 max_polys 个连通域）。"""
     import cv2
 
