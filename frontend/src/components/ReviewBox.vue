@@ -11,13 +11,78 @@ const drawing = ref(null)          // {x0,y0,x1,y1}（视口像素）
 const pending = ref(null)          // {rect, comment}
 const listOpen = ref(false)
 
+// ---- 浮动按钮：可拖动 / 可隐藏（位置与隐藏状态持久化） ----
+const LS_POS = 'ccd-review-pos'
+const LS_HIDDEN = 'ccd-review-hidden'
+const posX = ref(window.innerWidth - 180)
+const posY = ref(window.innerHeight - 70)
+const hidden = ref(false)
+const dragState = ref(null)        // {sx, sy, ox, oy, origin}
+let _moved = false
+
+function clampPos() {
+  posX.value = Math.max(4, Math.min(posX.value, window.innerWidth - 64))
+  posY.value = Math.max(4, Math.min(posY.value, window.innerHeight - 44))
+}
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(LS_POS) || 'null')
+    if (Array.isArray(p)) { posX.value = p[0]; posY.value = p[1] }
+    hidden.value = localStorage.getItem(LS_HIDDEN) === '1'
+  } catch { /* ignore */ }
+  clampPos()
+}
+function persistPrefs() {
+  try {
+    localStorage.setItem(LS_POS, JSON.stringify([Math.round(posX.value), Math.round(posY.value)]))
+    localStorage.setItem(LS_HIDDEN, hidden.value ? '1' : '0')
+  } catch { /* ignore */ }
+}
+
+function onFabDown(e) {
+  if (e.button !== 0) return
+  dragState.value = {
+    sx: e.clientX, sy: e.clientY,
+    ox: posX.value, oy: posY.value,
+    origin: e.currentTarget.dataset.origin || 'fab',
+  }
+  _moved = false
+  window.addEventListener('mousemove', onFabMove)
+  window.addEventListener('mouseup', onFabUp)
+  e.preventDefault()
+}
+function onFabMove(e) {
+  if (!dragState.value) return
+  const dx = e.clientX - dragState.value.sx
+  const dy = e.clientY - dragState.value.sy
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) _moved = true
+  if (_moved) {
+    posX.value = Math.max(4, Math.min(dragState.value.ox + dx, window.innerWidth - 64))
+    posY.value = Math.max(4, Math.min(dragState.value.oy + dy, window.innerHeight - 44))
+  }
+}
+function onFabUp() {
+  window.removeEventListener('mousemove', onFabMove)
+  window.removeEventListener('mouseup', onFabUp)
+  const origin = dragState.value?.origin || 'fab'
+  const wasDrag = _moved
+  dragState.value = null
+  _moved = false
+  if (wasDrag) { persistPrefs(); return }   // 拖动：仅保存位置
+  // 单击：主按钮切换框选；小圆点恢复显示
+  if (origin === 'dot') { hidden.value = false; persistPrefs() }
+  else { enabled.value = !enabled.value }
+}
+function hideFab() { hidden.value = true; enabled.value = false; persistPrefs() }
+
 const currentRouteMarks = computed(() =>
   marks.value.filter(m => m.route === route.fullPath))
 
 async function load() {
   try { marks.value = await api.review.list() } catch { marks.value = [] }
 }
-onMounted(load)
+onMounted(() => { load(); loadPrefs(); window.addEventListener('resize', clampPos) })
+onUnmounted(() => window.removeEventListener('resize', clampPos))
 
 function onDown(e) {
   if (!enabled.value || pending.value) return
@@ -93,12 +158,21 @@ const pendingStyle = computed(() => {
 </script>
 
 <template>
-  <!-- 浮动开关 -->
-  <button class="review-fab" :class="{ on: enabled }" @click="enabled = !enabled"
-          :title="enabled ? '关闭框选' : '开启框选（按住左键拖拽框选区域）'">
-    <span class="fab-icon">▣</span>
-    <span class="fab-text">{{ enabled ? '框选中…' : '框选评审' }}</span>
-  </button>
+  <!-- 浮动开关：可拖动（按住拖到任意位置）、可隐藏（— 收起为小圆点） -->
+  <div v-if="!hidden" class="fab-wrap" :style="{ left: posX + 'px', top: posY + 'px' }"
+       data-origin="fab" @mousedown="onFabDown" @mouseup="onFabUp" @dblclick.prevent>
+    <button class="review-fab" :class="{ on: enabled }" type="button" tabindex="0"
+            :title="enabled ? '关闭框选' : '开启框选（按住左键拖拽框选区域）'"
+            @keydown.enter.prevent="enabled = !enabled">
+      <span class="fab-icon">▣</span>
+      <span class="fab-text">{{ enabled ? '框选中…' : '框选评审' }}</span>
+    </button>
+    <button class="fab-hide" type="button" title="隐藏（需要时点小圆点恢复）"
+            @mousedown.stop @click.stop="hideFab">—</button>
+  </div>
+  <!-- 隐藏后的小圆点（可拖动，单击恢复） -->
+  <div v-else class="fab-dot" :style="{ left: posX + 'px', top: posY + 'px' }"
+       data-origin="dot" title="显示框选评审" @mousedown="onFabDown" @mouseup="onFabUp">▣</div>
 
   <!-- 框选层 -->
   <div v-if="enabled" class="review-layer"
@@ -143,17 +217,41 @@ const pendingStyle = computed(() => {
 </template>
 
 <style scoped>
+.fab-wrap {
+  position: fixed; z-index: 20000;
+  display: flex; align-items: center; gap: 6px;
+  cursor: grab; user-select: none; touch-action: none;
+}
+.fab-wrap:active { cursor: grabbing; }
 .review-fab {
-  position: fixed; right: 18px; bottom: 18px; z-index: 20000;
   display: flex; align-items: center; gap: 6px;
   padding: 8px 14px; border: 1px solid var(--border);
   border-radius: 999px; cursor: pointer;
   background: var(--bg-surface); color: var(--text-color);
   box-shadow: 0 4px 14px rgba(0,0,0,0.15);
   transition: all .15s ease;
+  font-size: 0.85rem;
 }
 .review-fab.on { background: var(--el-color-primary); color: #fff; border-color: transparent; }
 .fab-icon { font-size: 1rem; }
+.fab-hide {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg-surface);
+  color: var(--text-muted); font-size: 0.9rem; line-height: 1;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+.fab-hide:hover { color: var(--el-color-primary); border-color: var(--el-color-primary); }
+.fab-dot {
+  position: fixed; z-index: 20000;
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  color: var(--el-color-primary); font-size: 0.85rem;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  cursor: grab; user-select: none; touch-action: none;
+}
+.fab-dot:active { cursor: grabbing; }
 
 .review-layer { position: fixed; inset: 0; z-index: 19999; cursor: crosshair; }
 .review-draw {
