@@ -61,21 +61,23 @@ class SmpSegmentEngine(EngineBase):
                             from app.ops import apply_preprocess
                             img = apply_preprocess(img, pipeline_ops)
                         # mask 先按原图尺寸渲染，再同步预处理引起的几何变化（如 resize）
+                        from app.engines.rle import ann_to_mask
                         mask = np.zeros((im["height"], im["width"]), dtype=np.uint8)
                         for a in items:
                             d = json.loads(a["data"])
                             if a["type"] == "shield":
                                 # 屏蔽区：不参与训练（255 = ignore，损失计算时忽略）
-                                if d.get("points"):
-                                    pts = np.array(d["points"], dtype=np.int32).reshape(-1, 2)
-                                    cv2.fillPoly(mask, [pts], 255)
+                                m = ann_to_mask(d, im["height"], im["width"])
+                                if m.any():
+                                    mask[m] = 255
                                 continue
                             c = idx.get(a["category_id"])
                             if c is None:
                                 continue
-                            if a["type"] == "mask" and d.get("points"):
-                                pts = np.array(d["points"], dtype=np.int32).reshape(-1, 2)
-                                cv2.fillPoly(mask, [pts], c)
+                            if a["type"] == "mask":
+                                m = ann_to_mask(d, im["height"], im["width"])
+                                if m.any():
+                                    mask[m] = c
                             elif a["type"] == "box":
                                 x1, y1 = int(d["x1"]), int(d["y1"])
                                 x2, y2 = int(d["x2"]), int(d["y2"])

@@ -8,6 +8,7 @@ import {
 } from 'naive-ui'
 import { api } from '../api'
 import { hexToRGBA, pointInPolygon } from '../utils/labeling'
+import { annToBitmap, bitmapToImageData, maskToRle, paintCircle, recomputeBbox } from '../utils/rle'
 import { ArrowLeft, ArrowRight, FullScreen, ZoomIn, ZoomOut, Check, Delete, Plus, Close } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -51,6 +52,7 @@ const samBox = ref(null)        // {x1,y1,x2,y2} 图像坐标
 const samPoints = ref([])       // 正点 [[x,y]]
 const samNegPoints = ref([])    // 负点 [[x,y]]
 const samPreview = ref([])      // 预览多边形列表
+const samRles = ref([])         // 与 samPreview 逐项对齐的 RLE 掩码
 const samDragStart = ref(null)  // 区分单击 / 拖拽画框
 const overlayCanvas = ref(null)
 let overlayCtx = null
@@ -61,6 +63,35 @@ const newCatColor = ref('#4E79A7')
 
 // ---- mask 逐像素编辑 ----
 const editingId = ref(null)
+
+// ---- RLE 位图缓存（逐像素级精度）：annId -> {data, h, w, bbox} ----
+// data 为行优先 Uint8Array(0/1)；rle 优先解码，旧数据（纯多边形）用扫描线填充兜底
+const maskBits = new Map()
+let scratchCanvas = null   // 掩码填充合成用离屏画布（原图像素尺寸）
+let scratchCtx = null
+
+function getMaskBitmap(a) {
+  const cached = maskBits.get(a.id)
+  if (cached) return cached
+  if (!currentImage.value?.width) return null
+  const d = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
+  const bm = annToBitmap(d, currentImage.value.height, currentImage.value.width)
+  maskBits.set(a.id, bm)
+  return bm
+}
+
+function clearMaskBits() { maskBits.clear() }
+
+/** 本地像素级绘制：在标注位图上画圆（erase=true 擦除 / false 涂抹），视觉即时生效 */
+function paintLocalMask(id, p, erase) {
+  const a = anns.value.find(x => x.id === id)
+  if (!a || !currentImage.value) return
+  const bm = getMaskBitmap(a)
+  if (!bm) return
+  const r = Math.max(1, brushSize.value / 2)
+  paintCircle(bm.data, bm.h, bm.w, p.x, p.y, r, erase ? 0 : 1)
+  renderOverlay()
+}
 
 // ---- 缩放 ----
 const viewScale = ref(1)
@@ -118,6 +149,7 @@ async function selectImage() {
   polyPts.value = []
   polyPreview.value = null
   ellipseDrag.value = null
+  clearMaskBits()
   await loadAnns()
   await nextTick()
   calcScale()
@@ -125,6 +157,7 @@ async function selectImage() {
 
 async function loadAnns() {
   if (!currentImage.value) { anns.value = []; return }
+  clearMaskBits()
   anns.value = await api.annotations.list(currentImage.value.id)
   selected.value = null
   editingId.value = null
@@ -238,6 +271,7 @@ async function restoreFromSnapshot(prevStr) {
     try { await api.annotations.remove(a.id) } catch { /* ignore */ }
   }
   anns.value = []
+  clearMaskBits()
   for (const a of prev) {
     try {
       // 快照中 data 可能是 JSON 字符串（列表接口原样返回），需解析为对象再提交
@@ -320,6 +354,31 @@ function applyEdit(p) {
       d.x2 = op.base.x2 + dx; d.y2 = op.base.y2 + dy
     } else {
       d.points = op.base.points.map(([x, y]) => [x + dx, y + dy])
+      // RLE 标注：位图同步平移（bbox 区域拷贝，像素级精确预览跟随）
+      const bm = maskBits.get(a.id)
+      if (bm && bm.bbox) {
+        const src = bm.data
+        const [bx1, by1, bx2, by2] = bm.bbox
+        const nw = bx2 - bx1 + 1, nh = by2 - by1 + 1
+        const tmp = new Uint8Array(nw * nh)
+        for (let y = 0; y < nh; y++) {
+          const srcRow = (by1 + y) * bm.w + bx1
+          tmp.set(src.subarray(srcRow, srcRow + nw), y * nw)
+        }
+        for (let y = by1; y <= by2; y++) src.fill(0, y * bm.w + bx1, y * bm.w + bx1 + nw)
+        const nx1 = bx1 + dx, ny1 = by1 + dy
+        for (let y = 0; y < nh; y++) {
+          const sy = ny1 + y
+          if (sy < 0 || sy >= bm.h) continue
+          for (let x = 0; x < nw; x++) {
+            const sx = nx1 + x
+            if (sx < 0 || sx >= bm.w) continue
+            if (tmp[y * nw + x]) src[sy * bm.w + sx] = 1
+          }
+        }
+        bm.bbox = recomputeBbox(src, bm.h, bm.w)
+        a.__dirtyRle = true  // endEdit 时重编码 RLE
+      }
     }
   } else if (op.kind === 'resize') {
     const c = op.corner
@@ -338,13 +397,27 @@ function applyEdit(p) {
 
 async function endEdit() {
   if (!editOp.value) return
-  const { id } = editOp.value
+  const { id, kind } = editOp.value
   editOp.value = null
-  pushHist()
   const a = anns.value.find(x => x.id === id)
   if (a) {
+    const data = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
+    if (kind === 'vertex') {
+      // 顶点编辑 → RLE 与多边形不再一致，降级为纯多边形（下次像素编辑由后端重建 RLE）
+      if (data.rle) { data.rle = null; a.data = data }
+      maskBits.delete(id)
+    } else if ((a.type === 'mask' || a.type === 'shield') && a.__dirtyRle) {
+      // 整体移动 → 位图已平移，重编码 RLE 保持像素级一致
+      const bm = maskBits.get(id)
+      if (bm) {
+        data.rle = maskToRle(bm.data, bm.h, bm.w)
+        bm.bbox = recomputeBbox(bm.data, bm.h, bm.w)
+        a.data = data
+      }
+      delete a.__dirtyRle
+    }
+    pushHist()
     try {
-      const data = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
       await api.annotations.update(id, { data })
     } catch { /* ignore */ }
   }
@@ -378,6 +451,35 @@ function drawCursor() {
 const zoomLabel = computed(() => Math.round(viewScale.value * fitScale.value * 100) + '%')
 
 // ---- Canvas 覆盖层渲染 ----
+function hexToRgbArr(hex) {
+  const h = hex.replace('#', '')
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+}
+
+function ensureScratch(w, h) {
+  if (!scratchCanvas) {
+    scratchCanvas = document.createElement('canvas')
+    scratchCtx = scratchCanvas.getContext('2d')
+  }
+  if (scratchCanvas.width !== w || scratchCanvas.height !== h) {
+    scratchCanvas.width = w
+    scratchCanvas.height = h
+  }
+}
+
+/** 位图填充合成到 overlay（RLE 像素级精确），只 drawImage bbox 区域 */
+function drawMaskFill(ctx, a, color, alpha, s) {
+  const bm = getMaskBitmap(a)
+  if (!bm || !bm.bbox || !currentImage.value) return
+  ensureScratch(currentImage.value.width, currentImage.value.height)
+  const img = bitmapToImageData(bm.data, bm.h, bm.w, bm.bbox, hexToRgbArr(color), alpha)
+  scratchCtx.clearRect(0, 0, scratchCanvas.width, scratchCanvas.height)
+  scratchCtx.putImageData(img, bm.bbox[0], bm.bbox[1])
+  const [x1, y1, x2, y2] = bm.bbox
+  const bw = x2 - x1 + 1, bh = y2 - y1 + 1
+  ctx.drawImage(scratchCanvas, x1, y1, bw, bh, x1 * s, y1 * s, bw * s, bh * s)
+}
+
 function renderOverlay() {
   if (!overlayCtx || !overlayCanvas.value) return
   const ctx = overlayCtx
@@ -422,40 +524,40 @@ function renderOverlay() {
     const color = a.color || '#4E79A7'
 
     ctx.save()
-    if (a.type === 'mask' && d.points?.length) {
+    if (a.type === 'mask' && (d.points?.length || d.rle)) {
+      if (fillMode.value) drawMaskFill(ctx, a, color, 0.25, s)
       ctx.beginPath()
-      ctx.moveTo(d.points[0][0] * s, d.points[0][1] * s)
-      for (let i = 1; i < d.points.length; i++) {
-        ctx.lineTo(d.points[i][0] * s, d.points[i][1] * s)
-      }
-      ctx.closePath()
-      if (fillMode.value) {
-        ctx.fillStyle = hexToRGBA(color, 0.25)
-        ctx.fill()
+      if (d.points?.length) {
+        ctx.moveTo(d.points[0][0] * s, d.points[0][1] * s)
+        for (let i = 1; i < d.points.length; i++) {
+          ctx.lineTo(d.points[i][0] * s, d.points[i][1] * s)
+        }
+        ctx.closePath()
       }
       ctx.strokeStyle = isEdit ? '#e15759' : isSel ? '#1b365d' : color
       ctx.lineWidth = isSel || isEdit ? 3 : 1.5
       ctx.stroke()
 
       // 标签
-      const bx = Math.min(...d.points.map(p => p[0])) * s
-      const by = Math.min(...d.points.map(p => p[1])) * s
+      const bx = Math.min(...(d.points?.length ? d.points.map(p => p[0]) : [0])) * s
+      const by = Math.min(...(d.points?.length ? d.points.map(p => p[1]) : [0])) * s
       _drawLabel(ctx, a.category_name, bx, by - 16, color)
-    } else if (a.type === 'shield' && d.points?.length) {
-      // 屏蔽区：虚线灰色区域，不参与训练
+    } else if (a.type === 'shield' && (d.points?.length || d.rle)) {
+      // 屏蔽区：灰色半透明像素填充（不参与训练）
+      if (fillMode.value) drawMaskFill(ctx, a, '#8a8175', 0.18, s)
       ctx.beginPath()
-      ctx.moveTo(d.points[0][0] * s, d.points[0][1] * s)
-      for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i][0] * s, d.points[i][1] * s)
-      ctx.closePath()
-      ctx.fillStyle = 'rgba(138,129,117,0.18)'
-      ctx.fill()
+      if (d.points?.length) {
+        ctx.moveTo(d.points[0][0] * s, d.points[0][1] * s)
+        for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i][0] * s, d.points[i][1] * s)
+        ctx.closePath()
+      }
       ctx.strokeStyle = '#8a8175'
       ctx.lineWidth = 1.5
       ctx.setLineDash([6, 4])
       ctx.stroke()
       ctx.setLineDash([])
-      const bx = Math.min(...d.points.map(p => p[0])) * s
-      const by = Math.min(...d.points.map(p => p[1])) * s
+      const bx = Math.min(...(d.points?.length ? d.points.map(p => p[0]) : [0])) * s
+      const by = Math.min(...(d.points?.length ? d.points.map(p => p[1]) : [0])) * s
       _drawLabel(ctx, '掩膜区', bx, by - 16, '#8a8175')
     } else if (a.type === 'box') {
       const x = d.x1 * s, y = d.y1 * s, w = (d.x2 - d.x1) * s, h = (d.y2 - d.y1) * s
@@ -755,14 +857,16 @@ function onMouseMove(e) {
   if (brushing.value) {
     const p = toImgCoord(e)
     brushRaw.push(p)
-    renderOverlay()
-    // 橡皮擦：增量实时擦除（鼠标拖到哪，掩码立刻少一块），40ms 节流提交
+    // 橡皮擦：本地位图即时擦除（鼠标拖到哪，掩码立刻少一块，像素级零延迟）
+    // + 增量节流提交后端（服务端权威 RLE 返回后重建缓存）
     if (mode.value === 'eraser') {
+      if (editingId.value) paintLocalMask(editingId.value, p, true)
       eraseAccum.push(p)
       if (!eraseTimer) {
-        eraseTimer = setTimeout(() => { eraseTimer = null; flushErase() }, 40)
+        eraseTimer = setTimeout(() => { eraseTimer = null; flushErase() }, 60)
       }
     }
+    renderOverlay()
     return
   }
   if (mode.value === 'sam' && samDragStart.value) {
@@ -811,6 +915,7 @@ async function onMouseUp(e) {
       // 橡皮擦：增量已实时提交，这里只补最后一段并清理（掩码可能已被擦完，绝不新建）
       flushErase()
       brushRaw = []
+      pushHist()  // 擦除后记录历史（撤销可回到擦除前）
       renderOverlay()
       return
     }
@@ -896,10 +1001,12 @@ function flushErase() {
     if (i < 0) return
     if (r.deleted) {
       anns.value.splice(i, 1)
+      maskBits.delete(editingId.value)
       editingId.value = null
       refreshBadge(-1)
     } else {
       anns.value[i] = r
+      maskBits.delete(r.id)  // 以服务端权威 RLE 重建缓存
     }
     renderOverlay()
   }).catch(() => { /* 网络抖动忽略，松手时最终提交兜底 */ })
@@ -915,11 +1022,13 @@ async function submitBrush() {
       })
       if (r.deleted) {
         anns.value = anns.value.filter(a => a.id !== editingId.value)
+        maskBits.delete(editingId.value)
         editingId.value = null
         refreshBadge(-1)
       } else {
         const i = anns.value.findIndex(a => a.id === editingId.value)
         if (i >= 0) anns.value[i] = r
+        maskBits.delete(editingId.value)  // 以服务端权威 RLE 重建缓存
       }
     } else {
       const isShield = mode.value === 'shield'
@@ -944,12 +1053,19 @@ async function submitBrush() {
   }
 }
 
-// ---- 掩码命中检测（射线法，见 utils/labeling.js） ----
+// ---- 掩码命中检测（RLE 位图优先 = 像素级精确；旧数据回退多边形射线法） ----
 
 function hitMask(p, onlyId = null) {
   for (const a of anns.value) {
     if (a.type !== 'mask' && a.type !== 'shield') continue
     if (onlyId != null && a.id !== onlyId) continue
+    const bm = getMaskBitmap(a)
+    if (bm && currentImage.value) {
+      const x = Math.round(p.x), y = Math.round(p.y)
+      if (x >= 0 && y >= 0 && x < currentImage.value.width && y < currentImage.value.height
+          && bm.data[y * bm.w + x]) return a.id
+      continue
+    }
     const d = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
     const pts = d.points || []
     if (pts.length < 3) continue
@@ -958,7 +1074,7 @@ function hitMask(p, onlyId = null) {
   return null
 }
 
-/** 画布点选：命中标注（框内 / 多边形内，后画的在上层优先） */
+/** 画布点选：命中标注（框内 / 掩码像素内，后画的在上层优先） */
 function findAnnoAt(p) {
   for (let i = anns.value.length - 1; i >= 0; i--) {
     const a = anns.value[i]
@@ -966,8 +1082,15 @@ function findAnnoAt(p) {
     const d = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
     if (a.type === 'box' && d.x1 != null) {
       if (p.x >= d.x1 && p.x <= d.x2 && p.y >= d.y1 && p.y <= d.y2) return a
-    } else if ((a.type === 'mask' || a.type === 'shield') && d.points?.length >= 3) {
-      if (pointInPolygon(p.x, p.y, d.points)) return a
+    } else if (a.type === 'mask' || a.type === 'shield') {
+      const bm = getMaskBitmap(a)
+      if (bm && currentImage.value) {
+        const x = Math.round(p.x), y = Math.round(p.y)
+        if (x >= 0 && y >= 0 && x < currentImage.value.width && y < currentImage.value.height
+            && bm.data[y * bm.w + x]) return a
+      } else if (d.points?.length >= 3) {
+        if (pointInPolygon(p.x, p.y, d.points)) return a
+      }
     }
   }
   return null
@@ -990,8 +1113,10 @@ async function runSam() {
       box: samBox.value ? [samBox.value.x1, samBox.value.y1, samBox.value.x2, samBox.value.y2] : null,
     })
     samPreview.value = r.polygons || []
+    samRles.value = r.rles || []   // 与 polygons 逐项对齐（像素级 RLE 存储）
   } catch (err) {
     samPreview.value = []
+    samRles.value = []
   } finally {
     samLoading.value = false
     renderOverlay()
@@ -1002,10 +1127,12 @@ async function confirmSam() {
   if (!catId.value) return message.warning('请先选择缺陷类别')
   if (!samPreview.value.length) return message.info('还没有预览结果，先画框或点击添加提示')
   const n = samPreview.value.length
-  for (const pts of samPreview.value) {
+  for (let i = 0; i < n; i++) {
+    const data = { points: samPreview.value[i] }
+    if (samRles.value && samRles.value[i]) data.rle = samRles.value[i]
     const a = await api.annotations.create({
       image_id: currentImage.value.id, category_id: catId.value,
-      type: 'mask', data: { points: pts }, source: 'sam',
+      type: 'mask', data, source: 'sam',
     })
     anns.value.push(a)
   }

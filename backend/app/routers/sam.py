@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 
 from app.db import get_conn
+from app.engines.rle import ann_to_mask, mask_to_ann_data
 
 # ---- 常量 ----
 SAM_CONF = 0.25        # SAM 推理置信度阈值
@@ -109,14 +110,28 @@ def sam_predict(body: SamPredictRequest):
         raise HTTPException(500, f"SAM 推理失败：{e}")
 
     if not results or results[0].masks is None:
-        return {"polygons": []}
+        return {"polygons": [], "rles": []}
     masks = results[0].masks.data.cpu().numpy()  # (N, H, W)
     if masks.shape[-2:] != (h, w):
         masks = [cv2.resize(m.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST).astype(bool) for m in masks]
     polygons = []
+    rles = []
+    from app.engines.rle import mask_to_rle
     for m in masks:
-        polygons.extend(_mask_to_polygons(m))
-    return {"polygons": polygons}
+        # 逐连通域：每个多边形标注附带其独立位图的 RLE（像素级精确存储）
+        mask_u8 = (m > 0).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in contours:
+            if cv2.contourArea(c) < MIN_POLY_AREA:
+                continue
+            poly = cv2.approxPolyDP(c, POLY_EPS, True).reshape(-1, 2)
+            if len(poly) < 3:
+                continue
+            cm = np.zeros_like(mask_u8)
+            cv2.drawContours(cm, [c], -1, 255, -1)
+            polygons.append([[float(x), float(y)] for x, y in poly])
+            rles.append(mask_to_rle(cm > 0))
+    return {"polygons": polygons, "rles": rles}
 
 
 @router.post("/annotations/{annotation_id}/paint")
@@ -142,11 +157,10 @@ def paint_mask(annotation_id: int, body: PaintRequest):
     scale_f = min(1.0, MAX_SIDE / max(w, h))
     sw, sh = max(1, int(w * scale_f)), max(1, int(h * scale_f))
 
-    # 还原现有掩码（降采样尺寸）
-    mask = np.zeros((sh, sw), dtype=np.uint8)
-    if d.get("points"):
-        pts = np.array(d["points"], dtype=np.float32).reshape(-1, 2) * scale_f
-        cv2.fillPoly(mask, [pts.astype(np.int32)], 255)
+    # 还原现有掩码（降采样尺寸；RLE 优先 = 逐像素精确还原）
+    mask = ann_to_mask(d, h, w).astype(np.uint8) * 255
+    if scale_f < 1.0:
+        mask = cv2.resize(mask, (sw, sh), interpolation=cv2.INTER_NEAREST)
 
     # 涂抹/擦除（降采样尺寸）
     r = max(1, int(round(body.brush_size * scale_f / 2)))
@@ -157,27 +171,21 @@ def paint_mask(annotation_id: int, body: PaintRequest):
     for i in range(len(pts) - 1):
         cv2.line(mask, pts[i], pts[i + 1], value, max(1, r))
 
-    # 重新提取轮廓（降采样尺寸）
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        with get_conn() as conn:
-            conn.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))
-        return {"deleted": True}
-    poly = max(contours, key=cv2.contourArea)
-    poly = cv2.approxPolyDP(poly, POLY_EPS, True).reshape(-1, 2)
-    if len(poly) < 3:
+    # 掩码是否已被完全擦除
+    if not mask.any():
         with get_conn() as conn:
             conn.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))
         return {"deleted": True}
 
-    # 坐标放大回原图
+    # 放大回原图（NEAREST 保持像素精确），RLE + 简化轮廓一并存储
     if scale_f < 1.0:
-        poly = poly.astype(np.float32) / scale_f
+        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+    data = mask_to_ann_data(mask > 0, eps=POLY_EPS)
 
     with get_conn() as conn:
         conn.execute(
             "UPDATE annotations SET data=? WHERE id=?",
-            (json.dumps({"points": [[float(x), float(y)] for x, y in poly]}, ensure_ascii=False), annotation_id),
+            (json.dumps(data, ensure_ascii=False), annotation_id),
         )
         row = conn.execute(
             """SELECT a.*, c.name AS category_name, c.color FROM annotations a
@@ -189,7 +197,7 @@ def paint_mask(annotation_id: int, body: PaintRequest):
 
 @router.post("/annotations/brush", status_code=201)
 def brush_to_mask(body: BrushRequest):
-    """笔刷轨迹 → 掩码多边形 → 创建 mask/shield 标注。"""
+    """笔刷轨迹 → 掩码位图（RLE 存储）→ 创建 mask/shield 标注。"""
     if len(body.points) < 2:
         raise HTTPException(400, "轨迹点太少")
     if body.type not in ("mask", "shield"):
@@ -202,12 +210,10 @@ def brush_to_mask(body: BrushRequest):
         cv2.circle(mask, (x, y), r, 255, -1)
     for i in range(len(pts) - 1):
         cv2.line(mask, pts[i], pts[i + 1], 255, max(1, r))
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
+    if not mask.any():
         raise HTTPException(400, "笔刷区域太小，无法生成掩码")
-    poly = max(contours, key=cv2.contourArea)
-    poly = cv2.approxPolyDP(poly, POLY_EPS, True).reshape(-1, 2)
-    if len(poly) < 3:
+    data = mask_to_ann_data(mask > 0, eps=POLY_EPS)
+    if not data.get("points"):
         raise HTTPException(400, "笔刷区域太小，无法生成掩码")
 
     with get_conn() as conn:
@@ -219,7 +225,7 @@ def brush_to_mask(body: BrushRequest):
             """INSERT INTO annotations (image_id, category_id, type, data, source)
                VALUES (?, ?, ?, ?, 'manual')""",
             (body.image_id, body.category_id, body.type,
-             json.dumps({"points": [[float(x), float(y)] for x, y in poly]}, ensure_ascii=False)),
+             json.dumps(data, ensure_ascii=False)),
         )
         row = conn.execute(
             """SELECT a.*, c.name AS category_name, c.color FROM annotations a

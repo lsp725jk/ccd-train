@@ -140,6 +140,7 @@ def delete_dataset(dataset_id: int):
 @router.post("/datasets/{dataset_id}/augment")
 def _render_ann_masks(items: list, h: int, w: int) -> list[tuple]:
     """标注 → (type, category_id, mask) 列表，统一走 mask 通道做几何变换。"""
+    from app.engines.rle import ann_to_mask
     ann_masks = []
     for a in items:
         d = json.loads(a["data"])
@@ -147,14 +148,16 @@ def _render_ann_masks(items: list, h: int, w: int) -> list[tuple]:
         if a["type"] == "box":
             cv2.rectangle(m, (int(d["x1"]), int(d["y1"])), (int(d["x2"]), int(d["y2"])), 255, -1)
             ann_masks.append(("box", a["category_id"], m))
-        elif a["type"] == "mask" and d.get("points"):
-            cv2.fillPoly(m, [np.array(d["points"], dtype=np.int32).reshape(-1, 2)], 255)
-            ann_masks.append(("mask", a["category_id"], m))
+        elif a["type"] == "mask":
+            m = ann_to_mask(d, h, w).astype(np.uint8) * 255
+            if m.any():
+                ann_masks.append(("mask", a["category_id"], m))
     return ann_masks
 
 
 def _extract_ann_from_mask(typ: str, tm: np.ndarray) -> dict | None:
-    """变换后的 mask → 标注 data（box→外接矩，mask→简化多边形）。返回 None 表示无法提取。"""
+    """变换后的 mask → 标注 data（box→外接矩，mask→RLE + 简化多边形）。返回 None 表示无法提取。"""
+    from app.engines.rle import mask_to_ann_data
     contours, _ = cv2.findContours(tm.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
@@ -164,10 +167,7 @@ def _extract_ann_from_mask(typ: str, tm: np.ndarray) -> dict | None:
         if bw < 2 or bh < 2:
             return None
         return {"x1": x, "y1": y, "x2": x + bw, "y2": y + bh}
-    poly = cv2.approxPolyDP(poly, 2.0, True).reshape(-1, 2)
-    if len(poly) < 3:
-        return None
-    return {"points": [[float(x), float(y)] for x, y in poly]}
+    return mask_to_ann_data(tm > 0)
 
 
 def augment_dataset(dataset_id: int, body: AugmentRequest):

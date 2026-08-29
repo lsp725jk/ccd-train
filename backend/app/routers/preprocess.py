@@ -111,9 +111,14 @@ def _defect_stats(image_id: int, scale: float, w: int, h: int):
         d = json.loads(a["data"])
         if a["type"] == "box" and all(k in d for k in ("x1", "y1", "x2", "y2")):
             px = (d["x2"] - d["x1"]) * (d["y2"] - d["y1"])
-        elif a["type"] == "mask" and d.get("points"):
-            pts = np.array(d["points"], dtype=np.float32).reshape(-1, 2)
-            px = float(cv2.contourArea(pts))
+        elif a["type"] == "mask":
+            # RLE 优先逐像素精确计数；旧数据（纯多边形）用 contourArea 近似
+            from app.engines.rle import ann_to_mask
+            m = ann_to_mask(d, h, w)
+            if m.any():
+                px = int(m.sum())
+            else:
+                continue
         else:
             continue
         total_px += px
