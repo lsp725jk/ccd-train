@@ -264,38 +264,64 @@ function pushHist() {
   histPtr.value = hist.value.length - 1
 }
 
+// P0 修复：撤销/重做恢复原子化。
+// - 互斥锁 restoring：恢复期间忽略再次 undo/redo（防 Ctrl+Z 连按并发交错）
+// - 先建后删：快照标注全部创建成功后才删除旧标注；创建失败则回滚已建并提示，
+//   避免"先删后建"在 create 失败时服务端标注永久丢失
+const restoring = ref(false)
+
 async function restoreFromSnapshot(prevStr) {
-  const prev = JSON.parse(prevStr)
-  // 全量重建该图像标注（服务端与视图一致）
-  for (const a of anns.value) {
-    try { await api.annotations.remove(a.id) } catch { /* ignore */ }
+  if (restoring.value) return
+  restoring.value = true
+  try {
+    const prev = JSON.parse(prevStr)
+    // 1) 先建：快照标注 → 服务端（任一失败即中止并回滚已创建项）
+    const created = []
+    let failed = false
+    for (const a of prev) {
+      try {
+        // 快照中 data 可能是 JSON 字符串（列表接口原样返回），需解析为对象再提交
+        const data = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
+        const r = await api.annotations.create({
+          image_id: a.image_id, category_id: a.category_id,
+          type: a.type, data, source: a.source,
+        })
+        created.push(r)
+      } catch {
+        failed = true
+        break
+      }
+    }
+    if (failed) {
+      // 回滚已创建的标注，保留旧数据不丢失
+      for (const c of created) {
+        try { await api.annotations.remove(c.id) } catch { /* ignore */ }
+      }
+      message.error('撤销恢复失败（服务端创建标注出错），已回滚，请刷新页面')
+      return
+    }
+    // 2) 后删：旧标注删除（尽力而为；删除失败不影响新标注）
+    for (const a of anns.value) {
+      try { await api.annotations.remove(a.id) } catch { /* ignore */ }
+    }
+    anns.value = created
+    clearMaskBits()
+    selected.value = null
+    editingId.value = null
+    refreshBadge(0)
+    renderOverlay()
+  } finally {
+    restoring.value = false
   }
-  anns.value = []
-  clearMaskBits()
-  for (const a of prev) {
-    try {
-      // 快照中 data 可能是 JSON 字符串（列表接口原样返回），需解析为对象再提交
-      const data = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
-      const r = await api.annotations.create({
-        image_id: a.image_id, category_id: a.category_id,
-        type: a.type, data, source: a.source,
-      })
-      anns.value.push(r)
-    } catch { /* ignore */ }
-  }
-  selected.value = null
-  editingId.value = null
-  refreshBadge(0)
-  renderOverlay()
 }
 
 async function undo() {
-  if (!canUndo.value) return
+  if (restoring.value || !canUndo.value) return
   histPtr.value--
   await restoreFromSnapshot(hist.value[histPtr.value])
 }
 async function redo() {
-  if (!canRedo.value) return
+  if (restoring.value || !canRedo.value) return
   histPtr.value++
   await restoreFromSnapshot(hist.value[histPtr.value])
 }
