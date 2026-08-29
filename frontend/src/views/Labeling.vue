@@ -332,7 +332,7 @@ const editOp = ref(null)      // {kind: move/resize/vertex/polyMove, id, start, 
 function hitTestSelected(p) {
   const a = anns.value.find(x => x.id === selected.value)
   if (!a) return null
-  const d = typeof a.data === 'string' ? JSON.parse(a.data) : (a.data || {})
+  const d = typeof a.data === 'string' ? JSON.parse(a.data || '{}') : (a.data || {})
   if (a.type === 'box' && d.x1 != null) {
     const r = 10
     const corners = [[d.x1, d.y1], [d.x2, d.y1], [d.x1, d.y2], [d.x2, d.y2]]
@@ -1345,6 +1345,8 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', keyHandler)
   window.removeEventListener('keyup', keyUpHandler)
+  // 清理节流定时器（P1：切页后 timer 触发访问已卸载组件状态）
+  if (eraseTimer) { clearTimeout(eraseTimer); eraseTimer = null }
 })
 
 // ---- 标注列表按类别分组 ----
