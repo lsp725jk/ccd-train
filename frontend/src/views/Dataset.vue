@@ -125,14 +125,10 @@ watch(preview, (img, old) => {
 const catDlg = ref(false)
 const cats = ref([])
 const newCat = ref('')
-// 标注导入
+// 标注导入（傻瓜式：选文件夹自动识别 YOLO/LabelMe/COCO）
 const impDlg = ref(false)
-const impForm = ref({ format: 'yolo', path: '' })
-const importFormats = [
-  { value: 'yolo', label: 'YOLO txt（labels 目录）' },
-  { value: 'labelme', label: 'LabelMe JSON（目录或单文件）' },
-  { value: 'coco', label: 'COCO JSON（annotations 文件）' },
-]
+const impForm = ref({ path: '' })
+const impRunning = ref(false)
 // 增强扩充
 const augDlg = ref(false)
 const augPipelines = ref([])
@@ -207,12 +203,30 @@ function removeDataset(d) {
   })
 }
 async function doImport() {
-  if (!impForm.value.path.trim()) return message.warning('请输入标注文件路径')
+  if (!impForm.value.path.trim()) return message.warning('请选择标注文件夹')
   if (!current.value) return message.warning('请先选择数据集')
-  const r = await api.annotations.importAnnotations(current.value.id, { ...impForm.value })
-  message.success(`导入完成，共 ${r.created} 条标注`)
-  impDlg.value = false
-  impForm.value = { format: 'yolo', path: '' }
+  impRunning.value = true
+  try {
+    const r = await api.annotations.importFolder(current.value.id, impForm.value.path)
+    const fmt = r.by_format || {}
+    const parts = []
+    if (fmt.yolo) parts.push(`YOLO ${fmt.yolo} 条`)
+    if (fmt.labelme) parts.push(`LabelMe ${fmt.labelme} 条`)
+    if (fmt.coco) parts.push(`COCO ${fmt.coco} 条`)
+    const msg = `导入完成：共 ${r.created} 条标注` + (parts.length ? `（${parts.join('、')}）` : '')
+    if (r.unmatched_total > 0) {
+      message.warning(`${msg}；${r.unmatched_total} 个标注文件未匹配到图片（${(r.unmatched || []).slice(0, 3).join('、')}${r.unmatched_total > 3 ? '…' : ''}）`)
+    } else {
+      message.success(msg)
+    }
+    impDlg.value = false
+    impForm.value = { path: '' }
+    loadCats()  // 自动创建的类别刷新显示
+  } catch (e) {
+    message.error(String(e.response?.data?.detail || e.message).slice(0, 200))
+  } finally {
+    impRunning.value = false
+  }
 }
 
 async function loadDatasets() {
@@ -382,19 +396,23 @@ async function doSplit() {
       </template>
     </n-modal>
 
-    <n-modal v-model:show="impDlg" preset="card" title="导入标注" style="width:460px">
+    <n-modal v-model:show="impDlg" preset="card" title="导入标注" style="width:480px">
       <n-form label-placement="left" label-width="80">
-        <n-form-item label="格式">
-          <n-select v-model:value="impForm.format" :options="importFormats" style="width:100%" />
-        </n-form-item>
-        <n-form-item label="路径">
-          <n-input v-model:value="impForm.path" :placeholder="impForm.format === 'yolo' ? 'labels 目录路径，如 E:\\data\\labels' : impForm.format === 'labelme' ? 'JSON 目录或单文件路径' : 'annotations.json 路径'" />
+        <n-form-item label="文件夹">
+          <DirectoryPicker v-model="impForm.path" />
         </n-form-item>
       </n-form>
+      <div style="color:var(--text-muted);font-size:0.8rem;line-height:1.7">
+        选择图片或标注所在文件夹即可，自动识别：<br>
+        · YOLO txt（与图片同名，支持 labels/ 子目录、classes.txt 类别表）<br>
+        · LabelMe JSON（与图片同目录）<br>
+        · COCO JSON（annotations 文件）<br>
+        三种格式可混放在同一文件夹；缺失的类别会自动创建。
+      </div>
       <template #footer>
         <div style="display:flex;justify-content:flex-end;gap:8px">
           <n-button @click="impDlg = false">取消</n-button>
-          <n-button type="primary" @click="doImport">导入</n-button>
+          <n-button type="primary" :loading="impRunning" @click="doImport">开始导入</n-button>
         </div>
       </template>
     </n-modal>
