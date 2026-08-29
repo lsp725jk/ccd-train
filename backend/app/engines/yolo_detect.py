@@ -147,8 +147,13 @@ class YoloDetectEngine(EngineBase):
             return
         model = YOLO(str(self.weights_path))
         val_dir = yolo_project / "val"
+        # P1 修复：test 集为空时回退 val 评估（ultralytics 对空 split 会报错/空指标）
+        eval_imgs = list((data_dir / "test" / "images").glob("*"))
+        eval_split = "test" if eval_imgs else "val"
+        if eval_split == "val":
+            self.log("[warn] test 集为空，改用 val 集评估")
         results = model.val(
-            data=str(yaml_path), split="test",
+            data=str(yaml_path), split=eval_split,
             project=str(yolo_project), name="val", exist_ok=True, device=resolve_device(cfg),
         )
         metrics = {

@@ -43,8 +43,24 @@ def submit(task_id: int) -> None:
 
 
 def stop(task_id: int) -> bool:
+    """停止任务：queued（排队中）→ 出队标 stopped；running → kill 子进程。"""
     with _lock:
-        p = _procs.get(task_id)
+        if task_id in _queue:
+            _queue.remove(task_id)
+            queued = True
+        else:
+            queued = False
+            p = _procs.get(task_id)
+    if queued:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE train_tasks SET status='stopped', finished_at=datetime('now','localtime') WHERE id=?",
+                (task_id,),
+            )
+            row = conn.execute("SELECT model_id FROM train_tasks WHERE id=?", (task_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE models SET status='failed' WHERE id=?", (row["model_id"],))
+        return True
     if p and p.poll() is None:
         p.kill()
         with get_conn() as conn:
@@ -64,14 +80,27 @@ def running_task() -> int | None:
         return _running
 
 
+def _kill_orphan(pid: int):
+    """Windows 下强杀孤儿进程（taskkill 不存在时静默忽略）。"""
+    try:
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                       capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
 def _recover():
     """服务重启后恢复：queued 任务重新入队，running 任务标记失败（引擎进程已丢失）。
     同时把 running 任务对应的模型置为 failed，避免 models 状态永远卡在 training。
+    修复：清理孤儿引擎子进程（旧进程仍占 GPU 且可能反向写回 success）。
     """
     queued = []
+    orphans = []
     with get_conn() as conn:
         queued = [r[0] for r in conn.execute(
             "SELECT id FROM train_tasks WHERE status='queued' ORDER BY id").fetchall()]
+        orphans = [(r[0], r["pid"]) for r in conn.execute(
+            "SELECT id, pid FROM train_tasks WHERE status='running'").fetchall()]
         conn.execute(
             "UPDATE train_tasks SET status='failed', error='服务重启，任务中断', "
             "finished_at=datetime('now','localtime') WHERE status='running'")
@@ -79,6 +108,9 @@ def _recover():
         conn.execute(
             "UPDATE models SET status='failed' WHERE id IN ("
             "SELECT model_id FROM train_tasks WHERE status='failed' AND error='服务重启，任务中断')")
+    for tid, pid in orphans:
+        if pid:
+            _kill_orphan(pid)
     for tid in queued:
         submit(tid)
 
@@ -139,6 +171,10 @@ def _run(task_id: int) -> None:
                     p.wait()
                     with _lock:
                         _procs.pop(task_id, None)
+                    # P1 修复：子进程异常退出（非 0）时引擎可能在 start() 前崩溃
+                    # （import 错误等），状态会永久卡 running——这里兜底标记 failed
+                    if p.returncode != 0:
+                        _finish_failed(f"训练进程异常退出（code {p.returncode}），详见 train.log")
     except Exception as e:
         _finish_failed(f"队列异常: {str(e)[:500]}")
     finally:

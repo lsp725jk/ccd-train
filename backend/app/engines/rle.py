@@ -59,9 +59,15 @@ def ann_to_mask(d: dict, h: int, w: int) -> np.ndarray:
             pass
     pts = d.get("points")
     if pts and len(pts) >= 3:
-        mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.fillPoly(mask, [np.array(pts, dtype=np.int32).reshape(-1, 2)], 255)
-        return np.ascontiguousarray(mask > 0)
+        try:
+            arr = np.asarray(pts, dtype=np.float64)
+            if arr.ndim != 2 or arr.shape[1] != 2 or not np.isfinite(arr).all():
+                return np.zeros((h, w), dtype=bool)
+            mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.fillPoly(mask, [arr.astype(np.int32).reshape(-1, 2)], 255)
+            return np.ascontiguousarray(mask > 0)
+        except Exception:
+            return np.zeros((h, w), dtype=bool)
     return np.zeros((h, w), dtype=bool)
 
 

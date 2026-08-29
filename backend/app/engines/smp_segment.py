@@ -77,11 +77,16 @@ class SmpSegmentEngine(EngineBase):
                             if a["type"] == "mask":
                                 m = ann_to_mask(d, im["height"], im["width"])
                                 if m.any():
-                                    mask[m] = c
+                                    # 屏蔽区优先：类标注不覆盖 ignore 区域（P1 修复）
+                                    region = m & (mask != 255)
+                                    mask[region] = c
                             elif a["type"] == "box":
                                 x1, y1 = int(d["x1"]), int(d["y1"])
                                 x2, y2 = int(d["x2"]), int(d["y2"])
-                                cv2.rectangle(mask, (x1, y1), (x2, y2), c, -1)
+                                box_mask = np.zeros_like(mask)
+                                cv2.rectangle(box_mask, (x1, y1), (x2, y2), 255, -1)
+                                region = (box_mask > 0) & (mask != 255)
+                                mask[region] = c
                         ph, pw = img.shape[:2]
                         if (ph, pw) != (im["height"], im["width"]):
                             mask = cv2.resize(mask, (pw, ph), interpolation=cv2.INTER_NEAREST)

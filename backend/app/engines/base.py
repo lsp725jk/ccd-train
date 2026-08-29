@@ -27,10 +27,18 @@ def get_db() -> sqlite3.Connection:
 
 
 def read_params_m(wfile: Path) -> float:
-    """从 torch checkpoint 读参数量（百万）。"""
+    """从 torch checkpoint 读参数量（百万）。
+
+    信任边界：本函数只读平台自训产物（本机生成，可信）；仍优先 weights_only=True
+    （SAM 等纯权重格式），ultralytics 格式（含模型对象）才回退到全量加载。
+    """
     try:
         import torch
-        ckpt = torch.load(wfile, map_location="cpu", weights_only=False)
+        try:
+            ckpt = torch.load(wfile, map_location="cpu", weights_only=True)
+        except Exception:
+            # ultralytics checkpoint 含 nn.Module 对象，weights_only 无法加载
+            ckpt = torch.load(wfile, map_location="cpu", weights_only=False)
         model = ckpt.get("model") if isinstance(ckpt, dict) else None
         if model is not None and hasattr(model, "parameters"):
             return round(sum(p.numel() for p in model.parameters()) / 1e6, 2)
@@ -127,7 +135,17 @@ class EngineBase:
         """子类实现：数据准备 + 训练 + 评估。结束时设置 self.weights_path 等。"""
         raise NotImplementedError
 
+    def _has_artifact(self) -> bool:
+        """引擎产物校验（P1 修复：防止无权重/无产物仍标记成功）。
+
+        默认要求权重文件存在；无权重类引擎（如 PatchCore 特征库）可覆写。
+        """
+        return bool(self.weights_path and self.weights_path.is_file())
+
     def _finish_success(self):
+        if not self._has_artifact():
+            raise RuntimeError(
+                f"引擎未生成有效产物（weights_path={self.weights_path}），任务按失败处理")
         # 把 metrics.json（引擎评估写出）同步回 models.metrics，训练效果页使用
         metrics = {}
         mfile = self.run_dir / "metrics.json"

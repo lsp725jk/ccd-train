@@ -30,22 +30,23 @@ TASK_TYPES = {"detect", "segment", "classify", "us_classify", "us_segment"}
 
 
 def _read_params(file_path: Path) -> float:
-    """尝试读取参数量（百万）。torch 可用时读取 checkpoint；否则返回 0。"""
+    """尝试读取参数量（百万）。torch 可用时读取 checkpoint；否则返回 0。
+
+    P1 安全修复：只允许 weights_only=True（纯张量），不可信文件绝不全量反序列化
+    （pickle RCE）；ultralytics 等含模型对象的格式不在此解析参数量。
+    """
     try:
         import torch
         if file_path.suffix.lower() in {".pt", ".pth"}:
-            ckpt = torch.load(file_path, map_location="cpu", weights_only=False)
-            model = ckpt.get("model") or ckpt
-            if hasattr(model, "parameters"):
-                return round(sum(p.numel() for p in model.parameters()) / 1e6, 2)
-            sd = model if isinstance(model, dict) and "layers" in str(type(model)) else None
+            try:
+                ckpt = torch.load(file_path, map_location="cpu", weights_only=True)
+            except Exception:
+                return 0.0  # 非纯张量格式：拒绝解析（不降级到 weights_only=False）
             if isinstance(ckpt, dict):
                 for key in ("state_dict", "model_state_dict"):
                     if key in ckpt and isinstance(ckpt[key], dict):
-                        sd = ckpt[key]
-                        break
-            if isinstance(sd, dict):
-                return round(sum(v.numel() for v in sd.values() if hasattr(v, "numel")) / 1e6, 2)
+                        return round(sum(v.numel() for v in ckpt[key].values() if hasattr(v, "numel")) / 1e6, 2)
+                return round(sum(v.numel() for v in ckpt.values() if hasattr(v, "numel")) / 1e6, 2)
     except Exception:
         pass
     return 0.0

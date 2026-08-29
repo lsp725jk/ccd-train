@@ -51,15 +51,19 @@ def load_images(conn: sqlite3.Connection, dataset_id: int, split: str | None = N
 
 
 def load_categories(conn: sqlite3.Connection, project_id: int, dataset_ids: list[int] | None = None) -> list:
-    """加载类别。dataset_ids 为空/None 时取项目全部类别，否则取这些数据集内的类别。"""
+    """加载类别。dataset_ids 为空/None 时取项目全部类别，否则取这些数据集内的类别。
+
+    P1 修复：同时包含 dataset_id 为 NULL 的项目级类别（此前被 IN 查询静默排除）。
+    """
     if not dataset_ids:
         return list(conn.execute(
             "SELECT * FROM categories WHERE project_id=? ORDER BY id", (project_id,)
         ).fetchall())
     placeholders = ",".join("?" * len(dataset_ids))
     return list(conn.execute(
-        f"SELECT * FROM categories WHERE dataset_id IN ({placeholders}) ORDER BY id",
-        tuple(dataset_ids),
+        f"SELECT * FROM categories WHERE dataset_id IN ({placeholders}) OR "
+        f"(dataset_id IS NULL AND project_id=?) ORDER BY id",
+        (*tuple(dataset_ids), project_id),
     ).fetchall())
 
 

@@ -272,13 +272,17 @@ AUG_REGISTRY = {
                         {**_float_spec("概率", 1.0, 0, 1, 0.05), "name": "p"},
                     ]),
     "gauss_noise": _aug("gauss_noise", "高斯噪声",
-                        lambda var=40.0, p=1.0: A.GaussNoise(var_limit=(0.0, float(var)), p=float(p)),
+                        # albumentations 2.x：var_limit 已废弃为 std_range（归一化标准差，0-1 相对 255）
+                        lambda var=40.0, p=1.0: A.GaussNoise(
+                            std_range=(0.0, min(1.0, float(var) ** 0.5 / 255.0)), p=float(p)),
                         [
                             {**_float_spec("方差上限", 40.0, 5, 255, 5), "name": "var"},
                             {**_float_spec("概率", 1.0, 0, 1, 0.05), "name": "p"},
                         ]),
     "salt_pepper": _aug("salt_pepper", "椒盐噪声",
-                        lambda amount=0.03, p=1.0: A.SaltAndPepper(amount=float(amount), p=float(p)),
+                        # albumentations 2.x：amount 必须为 (min, max) 元组
+                        lambda amount=0.03, p=1.0: A.SaltAndPepper(
+                            amount=(0.0, float(amount)), p=float(p)),
                         [
                             {**_float_spec("比例", 0.03, 0.0, 0.2, 0.01), "name": "amount"},
                             {**_float_spec("概率", 1.0, 0, 1, 0.05), "name": "p"},
@@ -290,9 +294,13 @@ AUG_REGISTRY = {
                      {**_float_spec("概率", 1.0, 0, 1, 0.05), "name": "p"},
                  ]),
     "cutout": _aug("cutout", "随机遮挡 Cutout",
+                    # albumentations 2.x：max_holes/max_height/max_width/fill_value 已废弃
+                    #（静默失效），改用 num_holes_range/hole_*_range/fill
                     lambda holes=8, size=32, p=1.0: A.CoarseDropout(
-                        max_holes=int(holes), max_height=int(size), max_width=int(size),
-                        fill_value=128, p=float(p)),
+                        num_holes_range=(1, max(1, int(holes))),
+                        hole_height_range=(1, max(1, int(size))),
+                        hole_width_range=(1, max(1, int(size))),
+                        fill=128, p=float(p)),
                     [
                         {**_int_spec("空洞数", 8, 1, 20), "name": "holes"},
                         {**_int_spec("空洞尺寸", 32, 8, 128, 8), "name": "size"},

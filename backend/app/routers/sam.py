@@ -4,7 +4,9 @@
 - POST /annotations/brush：笔刷轨迹点 → 掩码多边形 → 直接创建 mask 标注
 """
 import json
+import math
 import sqlite3
+import threading
 from pathlib import Path
 
 import cv2
@@ -134,8 +136,26 @@ def sam_predict(body: SamPredictRequest):
     return {"polygons": polygons, "rles": rles}
 
 
+# 同一标注的逐像素编辑互斥（P1 修复：并发 paint 读-改-写交错会导致
+# erase 删除与 update 竞争 → 500 / 标注复活 / 丢失更新）
+_paint_lock = threading.Lock()
+
+
+def _check_points(points: list) -> None:
+    """轨迹点校验：必须为有限的 [x, y] 坐标（P1 修复：NaN/奇数长度坐标会导致 500）。"""
+    for p in points:
+        if len(p) != 2 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in p):
+            raise HTTPException(400, "轨迹点必须为有限的 [x, y] 坐标")
+
+
 @router.post("/annotations/{annotation_id}/paint")
 def paint_mask(annotation_id: int, body: PaintRequest):
+    _check_points(body.points)
+    with _paint_lock:
+        return _paint_mask_locked(annotation_id, body)
+
+
+def _paint_mask_locked(annotation_id: int, body: PaintRequest):
     """逐像素编辑 mask 标注：涂抹/擦除后重新提取轮廓更新多边形。
 
     大图优化：mask 操作在降采样尺寸上进行（最长边 MAX_SIDE），
@@ -200,6 +220,7 @@ def brush_to_mask(body: BrushRequest):
     """笔刷轨迹 → 掩码位图（RLE 存储）→ 创建 mask/shield 标注。"""
     if len(body.points) < 2:
         raise HTTPException(400, "轨迹点太少")
+    _check_points(body.points)
     if body.type not in ("mask", "shield"):
         raise HTTPException(400, "type 必须是 mask 或 shield")
     img, w, h = _load_image(body.image_id)

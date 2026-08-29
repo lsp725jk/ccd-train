@@ -33,9 +33,15 @@ def _load_model():
 
 
 def _extract_features(model, img_bgr, device):
-    """单图特征：layer2 + layer3 拼接，展平 patch 特征 (P, D)。"""
+    """单图特征：layer2 + layer3 拼接，展平 patch 特征 (P, D)。
+
+    P1 修复：输入统一缩放到 IMG_SIZE（此前大图直接进网络，patch 数随图变化：
+    OOM 风险 + 热图 reshape 非方阵错位）。
+    """
     import torch
     import torchvision.transforms as T
+    if img_bgr.shape[0] != IMG_SIZE or img_bgr.shape[1] != IMG_SIZE:
+        img_bgr = cv2.resize(img_bgr, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_AREA)
     tf = T.Compose([
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -52,6 +58,10 @@ def _extract_features(model, img_bgr, device):
 
 class PatchCoreEngine(EngineBase):
     task_type = "us_segment"
+
+    def _has_artifact(self):
+        """PatchCore 产物为特征库 bank.npy（无模型权重）。"""
+        return (self.run_dir / "bank.npy").is_file()
 
     def _normal_images(self):
         """train 集中无 box/mask 标注的图 = 正常样本。"""

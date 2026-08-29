@@ -85,9 +85,21 @@ def update_project(project_id: int, body: ProjectUpdate):
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: int):
     with get_conn() as conn:
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        if conn.total_changes == 0:
+        if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
             raise HTTPException(404, "项目不存在")
+        # train_tasks.dataset_id 无 ON DELETE 子句：先手动删任务，
+        # 否则 DELETE projects 级联删 datasets 时违反外键 → IntegrityError 500
+        task_ids = [r[0] for r in conn.execute(
+            "SELECT id FROM train_tasks WHERE model_id IN "
+            "(SELECT id FROM models WHERE project_id = ?)", (project_id,)).fetchall()]
+        conn.execute(
+            "DELETE FROM train_tasks WHERE model_id IN "
+            "(SELECT id FROM models WHERE project_id = ?)", (project_id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    from app.config import RUNS_DIR
+    import shutil
+    for tid in task_ids:
+        shutil.rmtree(RUNS_DIR / str(tid), ignore_errors=True)
 
 
 @router.get("/datasets/{dataset_id}/categories")
