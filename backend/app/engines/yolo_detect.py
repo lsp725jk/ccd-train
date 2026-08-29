@@ -12,7 +12,7 @@ import cv2
 from app.engines.base import EngineBase, get_db, run_engine, sync_ultralytics_curve
 from app.engines.data_utils import (
     cat_index, cfg_dataset_ids, defect_categories, get_pipeline_ops, imgsz_hw, load_annotations_multi,
-    load_categories, load_ds, load_images, read_image,
+    load_categories, load_ds, load_images, read_image, resolve_device,
 )
 
 COL_MAP = {
@@ -127,7 +127,7 @@ class YoloDetectEngine(EngineBase):
         ).start()
         model.train(
             data=str(yaml_path), epochs=cfg["epochs"], imgsz=imgsz_hw(cfg["imgsz"]),
-            batch=cfg["batch"], device=0, project=str(yolo_project), name="train",
+            batch=cfg["batch"], device=resolve_device(cfg), project=str(yolo_project), name="train",
             exist_ok=True, workers=2, patience=20, verbose=True,
             fliplr=float(cfg.get("aug_flip", True)),
             mosaic=float(cfg.get("aug_mosaic", 1.0)),
@@ -149,7 +149,7 @@ class YoloDetectEngine(EngineBase):
         val_dir = yolo_project / "val"
         results = model.val(
             data=str(yaml_path), split="test",
-            project=str(yolo_project), name="val", exist_ok=True, device=0,
+            project=str(yolo_project), name="val", exist_ok=True, device=resolve_device(cfg),
         )
         metrics = {
             "mAP50": round(float(results.box.map50), 4),
@@ -178,7 +178,7 @@ class YoloDetectEngine(EngineBase):
         for im in random.Random(1).sample(list(test_imgs), min(8, len(test_imgs))):
             ds = ds_map[im["dataset_id"]]
             img_path = Path(ds["root_path"]) / im["rel_path"]
-            res = model.predict(str(img_path), imgsz=imgsz_hw(cfg["imgsz"]), device=0, conf=0.25, verbose=False)
+            res = model.predict(str(img_path), imgsz=imgsz_hw(cfg["imgsz"]), device=resolve_device(cfg), conf=0.25, verbose=False)
             r = res[0]
             # 自定义绘制：类别名（中文）+ 置信度 + 面积（ultralytics 默认只画 class id）
             img_show = r.orig_img.copy() if r.orig_img is not None else cv2.imread(str(img_path))

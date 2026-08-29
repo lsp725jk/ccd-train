@@ -1,4 +1,4 @@
-"""引擎数据公共工具：数据集/图像/标注查询、类别映射、图像读取、管线获取。"""
+"""引擎数据公共工具：数据集/图像/标注查询、类别映射、图像读取、管线获取、设备解析。"""
 import json
 import sqlite3
 from pathlib import Path
@@ -8,6 +8,21 @@ import numpy as np
 
 # 常驻「正常」类别名：仅用于整图分类（有无判断），检测/分割训练时自动排除
 NORMAL_NAME = "正常"
+
+
+def resolve_device(cfg: dict | None = None) -> str:
+    """训练/推理设备统一解析（模块化：消除各处 device=0 硬编码）。
+
+    优先级：cfg.device（如 "0" / "cpu" / "0,1"）> 自动检测（CUDA 可用用 "0"，否则 "cpu"）。
+    CPU 机器不再因硬编码 device=0 崩溃。
+    """
+    if cfg and cfg.get("device"):
+        return str(cfg["device"])
+    try:
+        import torch
+        return "0" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
 
 
 def defect_categories(cats: list) -> list:

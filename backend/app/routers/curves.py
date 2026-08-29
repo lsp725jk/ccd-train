@@ -13,10 +13,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from app.db import get_conn
+from app.config import RUNS_DIR  # 统一来自 config（模块化：避免自行推导在冻结版下指向错误目录）
 
 router = APIRouter()
-
-RUNS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "runs"
 
 
 def _task_run_dir(task_id: int) -> Path:

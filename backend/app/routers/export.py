@@ -166,9 +166,10 @@ def predict_image(model_id: int, body: dict):
 def _predict_ultralytics(model, img_path: Path, out_path: Path, imgsz: int):
     """detect/classify：ONNX（已导出）或 torch 权重推理，Ultralytics 画框。"""
     from ultralytics import YOLO
+    from app.engines.data_utils import resolve_device
     src = model["onnx_path"] or (RUNS_DIR / str(_task_dir_of(model)) / "weights" / "best.pt")
     yolo = YOLO(str(src))
-    res = yolo.predict(str(img_path), imgsz=_imgsz_hw(imgsz), conf=0.25, verbose=False, device="0")
+    res = yolo.predict(str(img_path), imgsz=_imgsz_hw(imgsz), conf=0.25, verbose=False, device=resolve_device())
     if res and len(res[0].boxes):
         res[0].save(str(out_path))
     else:

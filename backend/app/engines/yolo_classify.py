@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from app.engines.base import EngineBase, get_db, run_engine, sync_ultralytics_curve
-from app.engines.data_utils import cfg_dataset_ids, imgsz_hw, load_categories, load_ds, load_images
+from app.engines.data_utils import cfg_dataset_ids, imgsz_hw, load_categories, load_ds, load_images, resolve_device
 
 COL_MAP = {
     "train/loss": "train_loss",
@@ -82,7 +82,7 @@ class YoloClassifyEngine(EngineBase):
         ).start()
         model.train(
             data=str(data_dir), epochs=cfg["epochs"], imgsz=imgsz_hw(cfg["imgsz"]),
-            batch=cfg["batch"], device=0, project=str(yolo_project), name="train",
+            batch=cfg["batch"], device=resolve_device(cfg), project=str(yolo_project), name="train",
             exist_ok=True, workers=2, patience=20, verbose=True,
             fliplr=float(cfg.get("aug_flip", True)),
             mixup=float(cfg.get("aug_mixup", 0.0)),
@@ -102,7 +102,7 @@ class YoloClassifyEngine(EngineBase):
         model = YOLO(str(self.weights_path))
         val_dir = yolo_project / "val"
         results = model.val(data=str(data_dir), project=str(yolo_project), name="val",
-                            exist_ok=True, device=0)
+                            exist_ok=True, device=resolve_device(cfg))
         metrics = {
             "top1_acc": round(float(results.top1), 4),
             "top5_acc": round(float(results.top5), 4),

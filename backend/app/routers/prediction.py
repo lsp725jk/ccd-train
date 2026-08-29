@@ -75,6 +75,7 @@ def _load_weight(run_dir: Path) -> Path:
 
 def _predict_detect(model, run_dir, cfg):
     from ultralytics import YOLO
+    from app.engines.data_utils import resolve_device
     ds_map, test_imgs = _test_images(cfg)
     with get_db_conn() as conn:
         cats = load_categories(conn, cfg["project_id"], cfg_dataset_ids(cfg))
@@ -88,7 +89,7 @@ def _predict_detect(model, run_dir, cfg):
     for im in _sample(test_imgs):
         ds = ds_map[im["dataset_id"]]
         img_path = Path(ds["root_path"]) / im["rel_path"]
-        res = yolo.predict(str(img_path), imgsz=imgsz_hw(cfg["imgsz"]), device=0, conf=0.25, verbose=False)
+        res = yolo.predict(str(img_path), imgsz=imgsz_hw(cfg["imgsz"]), device=resolve_device(cfg), conf=0.25, verbose=False)
         r = res[0]
         img_show = r.orig_img.copy() if r.orig_img is not None else cv2.imread(str(img_path))
         img_w, img_h = im["width"], im["height"]

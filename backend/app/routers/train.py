@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 
 from app.db import get_conn
+from app.config import RUNS_DIR  # 统一来自 config（模块化：避免自行推导在冻结版下指向错误目录）
 from app.services import train_queue
 
 class TrainCreate(BaseModel):
@@ -25,10 +26,9 @@ class TrainCreate(BaseModel):
     aug_mosaic: float = 1.0
     aug_mixup: float = 0.0
     aug_hsv: float = 0.015
+    device: str | None = None          # 训练设备（"0"/"cpu"…），缺省自动检测
 
 router = APIRouter()
-
-RUNS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "runs"
 
 
 @router.get("/engines")
@@ -90,6 +90,7 @@ def create_train(body: TrainCreate):
             "aug_pipeline_id": body.aug_pipeline_id,
             "aug_flip": body.aug_flip, "aug_mosaic": body.aug_mosaic,
             "aug_mixup": body.aug_mixup, "aug_hsv": body.aug_hsv,
+            "device": body.device,
         }, ensure_ascii=False),
         encoding="utf-8",
     )
