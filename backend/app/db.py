@@ -92,6 +92,15 @@ CREATE TABLE IF NOT EXISTS train_tasks (
     started_at TEXT,
     finished_at TEXT
 );
+
+-- 常用查询索引（P2：避免 N+1 全表扫描）
+CREATE INDEX IF NOT EXISTS idx_annotations_image ON annotations(image_id);
+CREATE INDEX IF NOT EXISTS idx_annotations_cat ON annotations(category_id);
+CREATE INDEX IF NOT EXISTS idx_images_dataset ON images(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_categories_dataset ON categories(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_categories_project ON categories(project_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_model ON train_tasks(model_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON train_tasks(status);
 """
 
 
@@ -99,6 +108,8 @@ def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # 并发写等待（P2：多实例/训练子进程写同一库时避免立即 locked 报错）
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

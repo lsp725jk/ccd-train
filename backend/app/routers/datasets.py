@@ -199,10 +199,16 @@ def augment_dataset(dataset_id: int, body: AugmentRequest):
     from app.ops import AUG_REGISTRY
     import albumentations as A
 
+    # P2：未知算子快速失败（此前 KeyError → 500 且已建数据集不清理）
+    for o in ops:
+        if o.get("name") not in AUG_REGISTRY:
+            raise HTTPException(400, f"未知增强算子: {o.get('name')}")
+
     # 输出目录 + 新数据集
     root = Path(ds["root_path"])
     out_dir = root.parent / f"{root.name}_aug"
     out_dir.mkdir(parents=True, exist_ok=True)
+    new_ds_id = None
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO datasets (project_id, name, root_path) VALUES (?, ?, ?)",
@@ -212,49 +218,58 @@ def augment_dataset(dataset_id: int, body: AugmentRequest):
 
     created_imgs = 0
     created_anns = 0
-    from app.engines.data_utils import read_image as _read_image
-    for im in imgs:
-        img = _read_image(ds, im)
-        if img is None:
-            continue
-        items = anns.get(im["id"], [])
-        class_items = [a for a in items if a["type"] == "class"]
-        ann_masks = _render_ann_masks(items, img.shape[0], img.shape[1])
-        for i in range(body.copies):
-            seed = random.randint(0, 2**31)
-            transforms = [AUG_REGISTRY[o["name"]]["builder"](**(o.get("params") or {})) for o in ops]
-            transform = A.Compose(transforms, seed=seed)
-            kwargs = {"image": img}
-            if ann_masks:
-                kwargs["masks"] = [x[2] for x in ann_masks]
-            aug = transform(**kwargs)
-            out_img = aug["image"]
-            # 保存图像
-            img_name = f"{im['id']:07d}_a{i:02d}.jpg"
-            cv2.imencode(".jpg", out_img)[1].tofile(out_dir / img_name)
+    try:
+        from app.engines.data_utils import read_image as _read_image
+        for im in imgs:
+            img = _read_image(ds, im)
+            if img is None:
+                continue
+            items = anns.get(im["id"], [])
+            class_items = [a for a in items if a["type"] == "class"]
+            ann_masks = _render_ann_masks(items, img.shape[0], img.shape[1])
+            for i in range(body.copies):
+                seed = random.randint(0, 2**31)
+                transforms = [AUG_REGISTRY[o["name"]]["builder"](**(o.get("params") or {})) for o in ops]
+                transform = A.Compose(transforms, seed=seed)
+                kwargs = {"image": img}
+                if ann_masks:
+                    kwargs["masks"] = [x[2] for x in ann_masks]
+                aug = transform(**kwargs)
+                out_img = aug["image"]
+                # 保存图像
+                img_name = f"{im['id']:07d}_a{i:02d}.jpg"
+                cv2.imencode(".jpg", out_img)[1].tofile(out_dir / img_name)
+                with get_conn() as conn:
+                    cur = conn.execute(
+                        "INSERT INTO images (dataset_id, rel_path, width, height, split) VALUES (?, ?, ?, ?, ?)",
+                        (new_ds_id, img_name, out_img.shape[1], out_img.shape[0], im["split"] or ""),
+                    )
+                    new_img_id = cur.lastrowid
+                    created_imgs += 1
+                    # 从变换后的 mask 重新提取标注
+                    for idx, (typ, cat_id, _m) in enumerate(ann_masks):
+                        data = _extract_ann_from_mask(typ, aug["masks"][idx])
+                        if data is None:
+                            continue
+                        conn.execute(
+                            "INSERT INTO annotations (image_id, category_id, type, data, source) VALUES (?, ?, ?, ?, 'aug')",
+                            (new_img_id, cat_id, typ, json.dumps(data)),
+                        )
+                        created_anns += 1
+                    for a in class_items:
+                        conn.execute(
+                            "INSERT INTO annotations (image_id, category_id, type, data, source) VALUES (?, ?, 'class', '{}', 'aug')",
+                            (new_img_id, a["category_id"]),
+                        )
+                        created_anns += 1
+    except Exception as e:
+        # P2：失败回滚——删除半成品数据集与输出目录，不留下脏数据
+        import shutil as _shutil
+        if new_ds_id is not None:
             with get_conn() as conn:
-                cur = conn.execute(
-                    "INSERT INTO images (dataset_id, rel_path, width, height, split) VALUES (?, ?, ?, ?, ?)",
-                    (new_ds_id, img_name, out_img.shape[1], out_img.shape[0], im["split"] or ""),
-                )
-                new_img_id = cur.lastrowid
-                created_imgs += 1
-                # 从变换后的 mask 重新提取标注
-                for idx, (typ, cat_id, _m) in enumerate(ann_masks):
-                    data = _extract_ann_from_mask(typ, aug["masks"][idx])
-                    if data is None:
-                        continue
-                    conn.execute(
-                        "INSERT INTO annotations (image_id, category_id, type, data, source) VALUES (?, ?, ?, ?, 'aug')",
-                        (new_img_id, cat_id, typ, json.dumps(data)),
-                    )
-                    created_anns += 1
-                for a in class_items:
-                    conn.execute(
-                        "INSERT INTO annotations (image_id, category_id, type, data, source) VALUES (?, ?, 'class', '{}', 'aug')",
-                        (new_img_id, a["category_id"]),
-                    )
-                    created_anns += 1
+                conn.execute("DELETE FROM datasets WHERE id=?", (new_ds_id,))
+        _shutil.rmtree(out_dir, ignore_errors=True)
+        raise HTTPException(500, f"增强失败（已回滚）: {str(e)[:300]}")
     with get_conn() as conn:
         conn.execute("UPDATE datasets SET image_count=? WHERE id=?", (created_imgs, new_ds_id))
     return {"dataset_id": new_ds_id, "images": created_imgs, "annotations": created_anns}

@@ -141,9 +141,14 @@ def task_detail(task_id: int):
 @router.get("/tasks/{task_id}/log")
 def task_log(task_id: int, offset: int = 0):
     """增量日志：前端传上次的 offset，返回新行。"""
+    if offset < 0:
+        offset = 0  # P2：负 offset 会 seek 报错
     log_path = RUNS_DIR / str(task_id) / "train.log"
     if not log_path.is_file():
         return {"offset": 0, "lines": []}
+    file_size = log_path.stat().st_size
+    if offset > file_size:
+        offset = file_size  # 日志被轮转清空后从头读
     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
         f.seek(offset)
         lines = f.read().splitlines()
