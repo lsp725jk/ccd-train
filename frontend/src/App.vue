@@ -133,7 +133,9 @@ function refresh() { router.replace({ path: route.path, query: { ...route.query,
                 :indent="16" @update:value="onMenuSelect" />
             </n-layout-sider>
             <n-layout-content class="main" :native-scrollbar="false">
-              <router-view />
+              <!-- 路由级 key：项目页以 pid+视图 为键，跨项目跳转强制重建组件，
+                   避免 setup 一次性捕获 route.params.pid 导致 pid 陈旧（P0 修复） -->
+              <router-view :key="route.name === 'projects' || route.name === 'scenes' ? String(route.name) : String(route.params.pid || '') + ':' + String(route.name)" />
             </n-layout-content>
           </n-layout>
           <ReviewBox />
