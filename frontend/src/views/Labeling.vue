@@ -1429,9 +1429,8 @@ const imgUrl = ref('')
           <div class="cat-row" v-for="c in defectCats" :key="c.id" @click="catId = c.id"
                :class="{ on: catId === c.id }" :title="c.name || ('类别 ' + c.id)">
             <!-- 修复：size=tiny 不是 Naive ColorPicker 合法尺寸（高度塌陷 2px）；
-                 small + 隐藏 hex 文本 = 紧凑纯色块 -->
+                 small + CSS 隐藏 hex 文本 = 紧凑纯色块 -->
             <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
-                            :show-value="false"
                             @complete="color => color && updateCatColor(c, color)"
                             style="flex-shrink:0;width:44px" />
             <!-- P1 修复：名字不截断（word-break 换行）——窄窗口下 ellipsis 会把中文名截没 -->
@@ -1583,6 +1582,11 @@ const imgUrl = ref('')
 </template>
 
 <style scoped>
+/* 类别行色块：隐藏 Naive ColorPicker 内嵌的 hex 文本（n-color-picker 无 show-value prop，
+   文本会显示在 44px 色块内并被截断成 "4E79A" 这类残缺文本） */
+.cat-row :deep(.n-color-picker__value) {
+  display: none !important;
+}
 .cat-row {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; border: 1px solid #d8cfbe; border-radius: 4px;
