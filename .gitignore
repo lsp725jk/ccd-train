@@ -47,3 +47,5 @@ desktop_thumbs.db
 
 # ---- 配套分发工具（大体积二进制，不进 git，由 pack.bat 从 backend/tools 打包） ----
 backend/tools/
+backend/pack/build/
+backend/pack/dist/
