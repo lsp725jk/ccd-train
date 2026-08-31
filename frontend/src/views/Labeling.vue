@@ -1413,9 +1413,10 @@ const imgUrl = ref('')
           <div style="font-weight:600;margin-bottom:8px;font-size:0.9rem">整图分类</div>
           <div v-if="normalCat" class="cat-row" :class="{ on: catId === normalCat.id }"
                @click="catId = normalCat.id">
-            <n-color-picker v-model:value="normalCat.color" size="small" :modes="['hex']" :show-alpha="false"
-                            @complete="color => color && updateCatColor(normalCat, color)" />
-            <span style="flex:1">{{ normalCat.name }}</span>
+            <!-- 原生取色器：纯色块、无内嵌文本、点击弹系统取色面板（统一外观） -->
+            <input type="color" class="cat-color" :value="normalCat.color || '#3F9D63'"
+                   @input="e => updateCatColor(normalCat, e.target.value)" @click.stop />
+            <span style="flex:1;min-width:0;word-break:break-all;line-height:1.4">{{ normalCat.name }}</span>
             <n-tag size="tiny" type="success" :bordered="false">常驻</n-tag>
           </div>
           <div v-else style="color:#8a8175;font-size:0.82rem;padding:6px 0">
@@ -1428,12 +1429,10 @@ const imgUrl = ref('')
           </div>
           <div class="cat-row" v-for="c in defectCats" :key="c.id" @click="catId = c.id"
                :class="{ on: catId === c.id }" :title="c.name || ('类别 ' + c.id)">
-            <!-- 修复：size=tiny 不是 Naive ColorPicker 合法尺寸（高度塌陷 2px）；
-                 small + CSS 隐藏 hex 文本 = 紧凑纯色块 -->
-            <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
-                            @complete="color => color && updateCatColor(c, color)"
-                            style="flex-shrink:0;width:44px" />
-            <!-- P1 修复：名字不截断（word-break 换行）——窄窗口下 ellipsis 会把中文名截没 -->
+            <!-- 统一外观：原生取色器纯色块 + 名字（与「正常」行一致） -->
+            <input type="color" class="cat-color" :value="c.color || '#4E79A7'"
+                   @input="e => updateCatColor(c, e.target.value)" @click.stop />
+            <!-- 名字不截断（word-break 换行）——窄窗口下 ellipsis 会把中文名截没 -->
             <span style="flex:1;min-width:0;word-break:break-all;line-height:1.4">{{ c.name || ('类别 ' + c.id) }}</span>
             <n-button text size="small" type="error" @click.stop="removeCat(c)"><n-icon><Close /></n-icon></n-button>
           </div>
@@ -1582,11 +1581,15 @@ const imgUrl = ref('')
 </template>
 
 <style scoped>
-/* 类别行色块：隐藏 Naive ColorPicker 内嵌的 hex 文本（n-color-picker 无 show-value prop，
-   文本会显示在 44px 色块内并被截断成 "4E79A" 这类残缺文本） */
-.cat-row :deep(.n-color-picker__value) {
-  display: none !important;
+/* 原生取色器色块（类别行统一外观）：纯色矩形、无内嵌文本、点击弹系统取色面板 */
+.cat-color {
+  width: 56px; height: 28px;
+  padding: 0; border: 1px solid #d8cfbe; border-radius: 4px;
+  background: transparent; cursor: pointer; flex-shrink: 0;
 }
+.cat-color::-webkit-color-swatch-wrapper { padding: 0; }
+.cat-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+.cat-color::-moz-color-swatch { border: none; border-radius: 3px; }
 .cat-row {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; border: 1px solid #d8cfbe; border-radius: 4px;
