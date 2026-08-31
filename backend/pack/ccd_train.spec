@@ -19,6 +19,10 @@ datas = [
     (str(BACKEND / "yolo26n.pt"), "."),
     (str(BACKEND / "mobile_sam.pt"), "."),
 ]
+# 独立标注工具（配套分发：X-AnyLabeling CPU 版，用户可单独运行）
+_tools = BACKEND / "tools"
+if (_tools / "X-AnyLabeling-CPU.exe").is_file():
+    datas.append((str(_tools / "X-AnyLabeling-CPU.exe"), "."))
 binaries = []
 hiddenimports = (
     collect_submodules("app")
