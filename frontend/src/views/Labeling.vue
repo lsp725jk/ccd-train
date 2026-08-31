@@ -1427,10 +1427,12 @@ const imgUrl = ref('')
             暂无缺陷类别，请先在数据集页添加
           </div>
           <div class="cat-row" v-for="c in defectCats" :key="c.id" @click="catId = c.id"
-               :class="{ on: catId === c.id }">
-            <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
-                            @complete="color => color && updateCatColor(c, color)" />
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis">{{ c.name }}</span>
+               :class="{ on: catId === c.id }" :title="c.name || ('类别 ' + c.id)">
+            <n-color-picker v-model:value="c.color" size="tiny" :modes="['hex']" :show-alpha="false"
+                            @complete="color => color && updateCatColor(c, color)"
+                            style="flex-shrink:0;width:52px" />
+            <!-- P1 修复：名字不截断（word-break 换行）——窄窗口下 ellipsis 会把中文名截没 -->
+            <span style="flex:1;min-width:0;word-break:break-all;line-height:1.4">{{ c.name || ('类别 ' + c.id) }}</span>
             <n-button text size="small" type="error" @click.stop="removeCat(c)"><n-icon><Close /></n-icon></n-button>
           </div>
           <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
