@@ -1428,9 +1428,12 @@ const imgUrl = ref('')
           </div>
           <div class="cat-row" v-for="c in defectCats" :key="c.id" @click="catId = c.id"
                :class="{ on: catId === c.id }" :title="c.name || ('类别 ' + c.id)">
-            <n-color-picker v-model:value="c.color" size="tiny" :modes="['hex']" :show-alpha="false"
+            <!-- 修复：size=tiny 不是 Naive ColorPicker 合法尺寸（高度塌陷 2px）；
+                 small + 隐藏 hex 文本 = 紧凑纯色块 -->
+            <n-color-picker v-model:value="c.color" size="small" :modes="['hex']" :show-alpha="false"
+                            :show-value="false"
                             @complete="color => color && updateCatColor(c, color)"
-                            style="flex-shrink:0;width:52px" />
+                            style="flex-shrink:0;width:44px" />
             <!-- P1 修复：名字不截断（word-break 换行）——窄窗口下 ellipsis 会把中文名截没 -->
             <span style="flex:1;min-width:0;word-break:break-all;line-height:1.4">{{ c.name || ('类别 ' + c.id) }}</span>
             <n-button text size="small" type="error" @click.stop="removeCat(c)"><n-icon><Close /></n-icon></n-button>
