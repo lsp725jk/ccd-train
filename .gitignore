@@ -45,7 +45,7 @@ _review/
 Thumbs.db
 desktop_thumbs.db
 
-# ---- ÅäÌ×·Ö·¢¹¤¾ß£¨´óÌå»ı¶ş½øÖÆ£¬²»½ø git£¬ÓÉ pack.bat ´Ó backend/tools ´ò°ü£© ----
+# ---- é…å¥—åˆ†å‘å·¥å…·ï¼ˆå¤§ä½“ç§¯äºŒè¿›åˆ¶ï¼Œä¸è¿› gitï¼Œç”± pack.bat ä» backend/tools æ‰“åŒ…ï¼‰ ----
 backend/tools/
 backend/pack/build/
 backend/pack/dist/
